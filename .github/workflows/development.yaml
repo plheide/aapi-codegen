@@ -53,6 +53,11 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          # actions/setup-go's module cache looks for go.sum at the
+          # workflow's working directory; aapi-codegen lives in a
+          # subdir (per the two-checkout layout) so point cache lookup
+          # there explicitly.
+          cache-dependency-path: aapi-codegen/go.sum
 
       # Install golangci-lint via the upstream install script, matching
       # plheide/go-jsonschema's pattern (same tool, same version, same
