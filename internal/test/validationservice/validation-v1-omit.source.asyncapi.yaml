@@ -1,0 +1,40 @@
+asyncapi: 3.1.0
+info:
+  title: ValidationDemo (omit-validation via spec extension)
+  version: 1.0.0
+  description: |
+    Variant of validation-v1 with the x-aapi-codegen.omit-validation
+    extension set — proves the spec extension wins regardless of
+    CLI/config defaults.
+
+defaultContentType: application/json
+
+x-aapi-codegen:
+  omit-validation: true
+
+channels:
+  pingChannel:
+    address: ping
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: Validation
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      PingMessage:
+        payload:
+          type: object
+          required: [id, msg]
+          additionalProperties: false
+          properties:
+            id:  { type: string }
+            msg: { type: string }
+
+operations:
+  sendPing:
+    action: send
+    channel: { $ref: '#/channels/pingChannel' }
+    messages:
+      - $ref: '#/channels/pingChannel/messages/PingMessage'

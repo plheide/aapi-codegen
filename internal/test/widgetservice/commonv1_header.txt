@@ -1,0 +1,21 @@
+// Hand-written canonical type for the cross-tree fixture. Mirrors what
+// aapi-codegen would emit if commonv1 were itself an AsyncAPI-driven
+// package — but commonv1 is JSON-Schema-only (no message contracts of
+// its own), so today it stays hand-written. M2.2 only validates that
+// widgetv1 imports this type instead of inlining it.
+//
+// The type carries no UnmarshalJSON: aapi-codegen does not emit
+// wire-compat shims. Consumers that need to accept legacy PascalCase
+// JSON write a small hand-maintained sibling compat.go. The fixture
+// exercises the shim-less path explicitly so cross-tree imports are
+// validated as a purely structural concern.
+
+package commonv1
+
+// MessageHeader matches the synthetic header.schema.json fixture (title:
+// "MessageHeader", required: traceID/tenantID/principal).
+type MessageHeader struct {
+	Principal string `json:"principal"`
+	TenantID  string `json:"tenantID"`
+	TraceID   string `json:"traceID"`
+}

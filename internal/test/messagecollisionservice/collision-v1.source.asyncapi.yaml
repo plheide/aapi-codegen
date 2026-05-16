@@ -1,0 +1,75 @@
+asyncapi: 3.1.0
+info:
+  title: CollisionService — regression fixture for materialize key namespacing
+  version: 1.0.0
+  description: |
+    Two channels both declare a message keyed `SharedMsg`. One references
+    `components.messages.SharedMsg` (resolver sets CanonicalName); the
+    other is an inline message that happens to share the channel-level
+    key. Before the materializer namespaced its output dirs, the second
+    materialize call silently overwrote the first's synthetic schema
+    file — only one type would be emitted. With the fix, the component
+    derives `components/messages/SharedMsg.schema.json` and the inline
+    derives `messages/SharedMsg.schema.json`; both end up in the
+    generated Go file as distinct types (different titles, different
+    fields).
+
+defaultContentType: application/json
+
+components:
+  messages:
+    SharedMsg:
+      contentType: application/json
+      payload:
+        title: ComponentSharedMsg
+        type: object
+        required: [componentField]
+        additionalProperties: false
+        properties:
+          componentField: { type: string }
+
+channels:
+  channelA:
+    address: 'a.{tenant}'
+    parameters:
+      tenant: { description: tenant }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: CollisionEx, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      SharedMsg:
+        $ref: '#/components/messages/SharedMsg'
+
+  channelB:
+    address: 'b.{tenant}'
+    parameters:
+      tenant: { description: tenant }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: CollisionEx, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      SharedMsg:
+        contentType: application/json
+        payload:
+          title: InlineSharedMsg
+          type: object
+          required: [inlineField]
+          additionalProperties: false
+          properties:
+            inlineField: { type: string }
+
+operations:
+  sendComponent:
+    action: send
+    channel: { $ref: '#/channels/channelA' }
+    messages:
+      - $ref: '#/channels/channelA/messages/SharedMsg'
+  sendInline:
+    action: send
+    channel: { $ref: '#/channels/channelB' }
+    messages:
+      - $ref: '#/channels/channelB/messages/SharedMsg'

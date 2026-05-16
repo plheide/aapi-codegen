@@ -1,0 +1,101 @@
+---
+# Development CI for aapi-codegen.
+#
+# Runs on every push to main and every PR: lint + vet + tests with
+# coverage + a snapshot goreleaser build. Coverage uploads to Codecov;
+# the snapshot build catches release-config drift well before the next
+# tag push tries to use it.
+#
+# Same two-checkout dance as release.yaml — aapi-codegen's go.mod has
+# a `replace github.com/atombender/go-jsonschema => ../go-jsonschema`
+# directive, so the build needs both repos checked out as siblings.
+#
+# Versions (AAPI_GJS_VERSION, GO_VERSION, GOLANGCI_LINT_VERSION, ...)
+# live in .github/versions.env and are loaded into $GITHUB_ENV by the
+# "Load versions" step below. Same file is loaded by release.yaml,
+# guaranteeing CI and release build against identical versions.
+
+name: development
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qa:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout aapi-codegen
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: aapi-codegen
+      - name: Load versions
+        # $GITHUB_ENV's format is strict KEY=VALUE only — comments and
+        # blank lines from versions.env would fail with "Invalid format".
+        # Filter to lines that look like environment-variable
+        # assignments before appending.
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' aapi-codegen/.github/versions.env >> "$GITHUB_ENV"
+      - name: Checkout go-jsonschema (sibling for the replace directive)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: ${{ env.AAPI_GJS_REPO }}
+          ref: ${{ env.AAPI_GJS_VERSION }}
+          path: go-jsonschema
+      - name: Setup Golang
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Install golangci-lint via the upstream install script, matching
+      # plheide/go-jsonschema's pattern (same tool, same version, same
+      # pinning convention). The action variant is cleaner but adds an
+      # external dependency this project doesn't otherwise need.
+      - name: Download golangci-lint installer
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/${{ env.GOLANGCI_LINT_VERSION }}/install.sh -o /tmp/install-golangci-lint.sh
+      - name: Install golangci-lint
+        run: sh /tmp/install-golangci-lint.sh -b /usr/local/bin ${{ env.GOLANGCI_LINT_VERSION }}
+      - name: Lint
+        working-directory: aapi-codegen
+        run: golangci-lint -v run --color=always --config=.golangci.yml ./...
+
+      - name: Vet
+        working-directory: aapi-codegen
+        run: go vet ./...
+      - name: Test with coverage
+        working-directory: aapi-codegen
+        run: go test ./... -race -count=1 -coverprofile=coverage.out -covermode=atomic
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6
+        with:
+          files: aapi-codegen/coverage.out
+          # CODECOV_TOKEN required for private repos; harmless to set
+          # always (Codecov's tokenless flow for public repos still
+          # works when the secret is empty).
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      # Snapshot build via goreleaser — validates that .goreleaser.yaml
+      # still parses + produces a buildable archive. --single-target
+      # restricts to the runner's platform (one binary instead of four)
+      # to keep PR turnaround fast; cross-compilation regressions are
+      # near-impossible with CGO_ENABLED=0 and would surface at the
+      # next tag push anyway.
+      - name: Snapshot build
+        # `build` (not `release`) here because --single-target is only
+        # available on `build` in goreleaser 2.x. Building catches the
+        # important regressions: config parses, builds compile. Skipping
+        # archive/checksum is fine — the release workflow exercises
+        # those on every tag push.
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
+        with:
+          distribution: goreleaser
+          version: 2.15.4
+          workdir: aapi-codegen
+          args: build --verbose --snapshot --clean --single-target

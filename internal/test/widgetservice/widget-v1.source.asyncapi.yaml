@@ -1,0 +1,79 @@
+asyncapi: 3.1.0
+info:
+  title: WidgetService — Widget Dispatch
+  version: 1.0.0
+  description: |
+    Synthetic AsyncAPI fixture used by aapi-codegen's M1 tracer-bullet test.
+    Two channels on the same direct exchange exercise the two address shapes
+    M1 must handle: a templated address with two parameters (jobDispatch
+    style) and a fixed-string address (cancellation style). Payloads are
+    real JSON Schemas so the JSON Schema → Go pass exercises cross-tree
+    $ref resolution end-to-end.
+
+defaultContentType: application/json
+
+channels:
+  widgetDispatch:
+    address: '{tenant}.{widgetType}'
+    title: Widget dispatch (per tenant × widgetType)
+    description: |
+      Routes WidgetMessages to the worker queue named
+      `{tenant}.{widgetType}` on the WidgetService direct exchange.
+    parameters:
+      tenant:
+        description: Tenant identifier.
+      widgetType:
+        description: Worker family identifier (open enum).
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: WidgetService
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      WidgetMessage:
+        name: WidgetMessage
+        title: Widget dispatch message
+        summary: Dispatches a widget work-item to the queue for `{tenant}.{widgetType}`.
+        contentType: application/json
+        payload:
+          $ref: './schemas/widget/v1/widget-message.schema.json'
+
+  widgetCancellation:
+    address: widget.cancellation
+    title: Widget cancellation (single fixed routing key)
+    description: |
+      Routes WidgetCancelMessages via a fixed routing key — every
+      cancellation consumer binds the same key and fans out in user space.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: WidgetService
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      WidgetCancelMessage:
+        name: WidgetCancelMessage
+        title: Widget cancellation message
+        summary: Instructs cancellation consumers that a running widget work-item has stopped.
+        contentType: application/json
+        payload:
+          $ref: './schemas/widget/v1/widget-cancel-message.schema.json'
+
+operations:
+  sendWidgetMessage:
+    action: send
+    channel:
+      $ref: '#/channels/widgetDispatch'
+    title: Dispatch a widget work-item
+    messages:
+      - $ref: '#/channels/widgetDispatch/messages/WidgetMessage'
+  sendWidgetCancelMessage:
+    action: send
+    channel:
+      $ref: '#/channels/widgetCancellation'
+    title: Cancel a running widget work-item
+    messages:
+      - $ref: '#/channels/widgetCancellation/messages/WidgetCancelMessage'

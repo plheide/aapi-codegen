@@ -1,0 +1,56 @@
+asyncapi: 3.1.0
+info:
+  title: NotificationService
+  version: 1.0.0
+  description: |
+    Synthetic AsyncAPI fixture for aapi-codegen's M4 acceptance. Exercises
+    spec shapes the M1–M3 widget fixture does not: a topic exchange (vs
+    direct), a single-parameter templated address ({eventCategory}, vs
+    the widget fixture's two parameters or fixed string), and an
+    independently-named header type so transitive $ref resolution is not
+    incidentally re-using widgetservice's MessageHeader. The whole point
+    of M4 is that aapi-codegen handles all of this with no code changes
+    after M3 — the test is green if the same generation pipeline
+    produces a working publisher for this spec.
+
+defaultContentType: application/json
+
+channels:
+  notificationDispatch:
+    address: '{eventCategory}'
+    title: Notification dispatch (per event-category topic routing)
+    description: |
+      Publishes NotificationMessages to the NotificationExchange topic
+      exchange, with the eventCategory as the routing key. Consumers
+      subscribe to specific category patterns (e.g. `security.*`,
+      `billing.invoice`).
+    parameters:
+      eventCategory:
+        description: |
+          Event category (e.g. 'security.audit', 'billing.invoice').
+          Doubles as the topic-exchange routing key.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: NotificationExchange
+          type: topic
+        bindingVersion: 0.3.0
+    messages:
+      NotificationMessage:
+        name: NotificationMessage
+        title: Notification message
+        summary: Publishes a notification under the given eventCategory.
+        contentType: application/json
+        payload:
+          $ref: './schemas/notification/v1/notification-message.schema.json'
+
+operations:
+  sendNotification:
+    action: send
+    channel:
+      $ref: '#/channels/notificationDispatch'
+    title: Publish a notification
+    summary: Publishes a NotificationMessage routed by eventCategory.
+    messages:
+      - $ref: '#/channels/notificationDispatch/messages/NotificationMessage'

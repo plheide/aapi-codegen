@@ -1,0 +1,39 @@
+asyncapi: 3.1.0
+info:
+  title: ValidationDemo
+  version: 1.0.0
+  description: |
+    Synthetic fixture for the Validation knob (Option B). The same
+    PingMessage spec is generated with validation on (default), opt-out
+    via CLI/config, and opt-out via the x-aapi-codegen.omit-validation
+    spec extension — the acceptance test asserts the right
+    UnmarshalJSON behaviour (or absence) in each.
+
+defaultContentType: application/json
+
+channels:
+  pingChannel:
+    address: ping
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: Validation
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      PingMessage:
+        payload:
+          type: object
+          required: [id, msg]
+          additionalProperties: false
+          properties:
+            id:  { type: string }
+            msg: { type: string }
+
+operations:
+  sendPing:
+    action: send
+    channel: { $ref: '#/channels/pingChannel' }
+    messages:
+      - $ref: '#/channels/pingChannel/messages/PingMessage'

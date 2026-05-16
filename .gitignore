@@ -1,0 +1,24 @@
+# goreleaser output
+dist/
+
+# Local AI-assistant context (plans, conventions, scratch notes that
+# don't belong in the public repo).
+.ai/
+# Personal working notes — keep local, never publish.
+aapi-codegen.todo.md
+*.todo.md
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Local build artifacts
+/aapi-codegen
+/cmd/aapi-codegen/aapi-codegen
+
+# Go
+*.test
+*.out
+
+# OS noise
+.DS_Store

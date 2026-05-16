@@ -1,0 +1,81 @@
+---
+# goreleaser config for aapi-codegen. Mirrors plheide/go-jsonschema's
+# build/archive shape so consumers can use a near-identical
+# use-aapi-codegen.sh script (see examples/use-aapi-codegen.sh).
+#
+# A successful build requires the patched go-jsonschema fork to be
+# checked out as a sibling at ../go-jsonschema, because aapi-codegen's
+# go.mod has a `replace github.com/atombender/go-jsonschema =>
+# ../go-jsonschema` directive. The release workflow handles this via
+# actions/checkout@v6 with `path:` set per repo.
+#
+# Distribution model: GitHub Releases only. No Docker image, no
+# Homebrew tap — kept lean while the tool is single-consumer. Matches
+# the download-and-cache pattern in examples/use-aapi-codegen.sh
+# (modelled on plheide/go-jsonschema's use-go-jsonschema.sh).
+
+version: 2
+project_name: aapi-codegen
+
+# No `before:` hooks. `go mod tidy` lives in the release workflow's
+# pre-flight step (single source of truth). Running it again here would
+# duplicate work and — worse — if the second tidy produced a different
+# result, goreleaser would see a dirty git workdir and abort mid-
+# release after the tag was already pushed.
+
+builds:
+  - main: ./cmd/aapi-codegen
+    binary: aapi-codegen
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Strip + dwarf-out for size. Version metadata embedding is
+    # deliberately omitted in v0.x — the version is pinned at the
+    # consumer-script level (AAPI_VERSION env var).
+    ldflags:
+      - -s -w
+
+archives:
+  # Asset name template mirrors plheide/go-jsonschema so a copy-edit
+  # of use-go-jsonschema.sh becomes use-aapi-codegen.sh. Mapping:
+  #   amd64 → x86_64,  386 → i386,  others (incl. arm64) → as-is.
+  - name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    # Windows users expect .zip; Linux/Darwin keep the .tar.gz default.
+    # use-aapi-codegen.sh extracts via `tar -xzf` or `unzip` per OS.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  # github.{owner,name} omitted so goreleaser auto-detects from the
+  # GITHUB_REPOSITORY env (in CI) or the git remote URL (locally) —
+  # this lets the release land wherever the fork is hosted without
+  # hard-coding plheide.
+  name_template: "{{ .Tag }}"
+  prerelease: auto

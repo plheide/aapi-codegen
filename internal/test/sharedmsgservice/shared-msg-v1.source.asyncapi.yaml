@@ -1,0 +1,77 @@
+asyncapi: 3.1.0
+info:
+  title: SharedMessageDemo
+  version: 1.0.0
+  description: |
+    Synthetic AsyncAPI fixture for the components.messages feature
+    (cross-channel message-wrapper reuse). Two channels reference the
+    same components.messages entry via $ref; the generator must:
+      - resolve the component into both channel slots,
+      - materialize the shared payload exactly once,
+      - emit one StatusChangePayload Go type (not two),
+      - emit one Send method per operation, both taking the shared
+        payload type.
+    This is the dedup contract end-to-end.
+
+defaultContentType: application/json
+
+components:
+  schemas:
+    StatusChangePayload:
+      type: object
+      required: [id, newStatus]
+      additionalProperties: false
+      properties:
+        id:        { type: string, description: Entity identifier. }
+        newStatus: { type: string, description: New status value. }
+  messages:
+    StatusChangeMessage:
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/StatusChangePayload' }
+
+channels:
+  primaryStatusChange:
+    address: '{entityType}'
+    parameters:
+      entityType: { description: Entity type; routing-key segment. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: PrimaryStatus, type: topic }
+        bindingVersion: 0.3.0
+    messages:
+      StatusChange:
+        $ref: '#/components/messages/StatusChangeMessage'
+
+  shadowStatusChange:
+    address: 'shadow.{entityType}'
+    parameters:
+      entityType: { description: Entity type; routing-key segment. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: ShadowStatus, type: topic }
+        bindingVersion: 0.3.0
+    messages:
+      StatusChange:
+        $ref: '#/components/messages/StatusChangeMessage'
+
+operations:
+  # Channel-scoped form (the longstanding shape) — passes through the
+  # resolver unchanged.
+  sendPrimary:
+    action: send
+    channel: { $ref: '#/channels/primaryStatusChange' }
+    messages:
+      - $ref: '#/channels/primaryStatusChange/messages/StatusChange'
+  # Component-scoped form — the resolver finds the unique slot on
+  # shadowStatusChange whose CanonicalName == StatusChangeMessage and
+  # rewrites to the channel-scoped equivalent. Both forms must
+  # produce the same generated publisher (same exchange, same routing
+  # key, same payload type), which is what the acceptance test
+  # validates downstream.
+  sendShadow:
+    action: send
+    channel: { $ref: '#/channels/shadowStatusChange' }
+    messages:
+      - $ref: '#/components/messages/StatusChangeMessage'

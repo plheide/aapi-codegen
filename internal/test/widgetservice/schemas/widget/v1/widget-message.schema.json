@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WidgetMessage",
+  "description": "Synthetic dispatch message — drives a widget worker to start a unit of work. Mirrors the structure of a typical engine-worker contract: header envelope, identifier, type discriminator, tenant routing, and a small parameter list.",
+  "type": "object",
+  "required": ["header", "id", "widgetType", "tenant"],
+  "additionalProperties": false,
+  "properties": {
+    "header":     { "$ref": "../../common/v1/header.schema.json" },
+    "id":         { "type": "string", "description": "Widget work-item ID (UUID) for traceability." },
+    "widgetType": { "type": "string", "description": "Open enum for the worker family (e.g. 'Trim', 'Polish')." },
+    "tenant":     { "type": "string", "description": "Tenant identifier; doubles as a routing-key segment." },
+    "parameters": {
+      "type": "array",
+      "description": "Optional name/value parameters consumed by the worker.",
+      "items": { "$ref": "#/$defs/WidgetParameter" }
+    }
+  },
+  "$defs": {
+    "WidgetParameter": {
+      "type": "object",
+      "required": ["name", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "name":  { "type": "string" },
+        "value": { "type": "string" }
+      }
+    }
+  }
+}

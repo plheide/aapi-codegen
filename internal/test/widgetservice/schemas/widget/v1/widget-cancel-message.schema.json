@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WidgetCancelMessage",
+  "description": "Synthetic cancellation message — instructs cancellation consumers that a running widget work-item has stopped. Mirrors the structure of a typical engine-worker cancellation contract.",
+  "type": "object",
+  "required": ["header", "widgetID", "tenant", "widgetType"],
+  "additionalProperties": false,
+  "properties": {
+    "header":     { "$ref": "../../common/v1/header.schema.json" },
+    "widgetID":   { "type": "string", "description": "Widget work-item ID being cancelled." },
+    "tenant":     { "type": "string", "description": "Tenant identifier." },
+    "widgetType": { "type": "string", "description": "Worker family identifier." }
+  }
+}

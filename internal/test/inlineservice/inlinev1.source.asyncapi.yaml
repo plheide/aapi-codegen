@@ -1,0 +1,88 @@
+asyncapi: 3.1.0
+info:
+  title: InlineService — inline payloads + components.schemas
+  version: 1.0.0
+  description: |
+    Synthetic AsyncAPI fixture for M5.5/Q4. Exercises spec shapes the
+    other fixtures don't:
+      - message payloads declared inline (no $ref to an external file),
+      - shared types declared once in components.schemas and referenced
+        from multiple payloads via #/components/schemas/X,
+      - mix of message-key-derived payload Go type name (InlineMessage)
+        and explicit title override (InlineCancelMsg).
+    All three are aapi-codegen-side concerns: the generator must
+    materialize the inline content into synthetic schema files for
+    go-jsonschema to consume.
+
+defaultContentType: application/json
+
+components:
+  schemas:
+    # Reusable type: declared once, referenced from multiple payloads.
+    # Materializes to tmpDir/components/Tag.schema.json with a
+    # synthesized title=Tag (since none is set on the inline declaration).
+    Tag:
+      type: object
+      required: [key, value]
+      additionalProperties: false
+      properties:
+        key:   { type: string }
+        value: { type: string }
+
+channels:
+  inlineDispatch:
+    address: '{tenant}'
+    parameters:
+      tenant: { description: Tenant identifier; routing-key segment. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: InlineService
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      InlineMessage:
+        name: InlineMessage
+        contentType: application/json
+        # Inline payload — no $ref. Go type name defaults to the
+        # message key ("InlineMessage").
+        payload:
+          type: object
+          required: [id, tags]
+          additionalProperties: false
+          properties:
+            id:
+              type: string
+              description: Inline-payload identifier.
+            tags:
+              type: array
+              items: { $ref: '#/components/schemas/Tag' }
+      InlineCancelMessage:
+        name: InlineCancelMessage
+        contentType: application/json
+        # Inline payload with explicit title — overrides the message-key
+        # default. The generated Go type is named "InlineCancelMsg".
+        payload:
+          title: InlineCancelMsg
+          type: object
+          required: [id, reason]
+          additionalProperties: false
+          properties:
+            id:     { type: string }
+            reason: { type: string }
+            tag:    { $ref: '#/components/schemas/Tag' }
+
+operations:
+  sendInline:
+    action: send
+    channel:
+      $ref: '#/channels/inlineDispatch'
+    messages:
+      - $ref: '#/channels/inlineDispatch/messages/InlineMessage'
+  sendInlineCancel:
+    action: send
+    channel:
+      $ref: '#/channels/inlineDispatch'
+    messages:
+      - $ref: '#/channels/inlineDispatch/messages/InlineCancelMessage'

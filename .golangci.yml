@@ -1,0 +1,33 @@
+version: "2"
+
+run:
+  go: "1.26"
+  modules-download-mode: readonly
+
+linters:
+  # `standard` is golangci-lint v2's curated baseline (errcheck, govet,
+  # staticcheck, ineffassign, unused, etc.). Augmented with a small set
+  # of additional linters that catch common Go bugs without burying
+  # legitimate code in noise.
+  default: standard
+  enable:
+    - bodyclose       # missing http.Response.Body.Close()
+    - gocritic        # opinionated extra checks; sometimes useful
+    - misspell        # comment typos
+    - prealloc        # slice preallocation hints
+    - gosec           # security issues (SQL injection, unsafe operations, etc.)
+  exclusions:
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Tests legitimately do things production code shouldn't.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+      # (No gochecknoglobals exclusion for cmd/*.go: that linter isn't
+      # in the `standard` preset or the additions above, so the rule
+      # was dead. If gochecknoglobals ever gets enabled, restore an
+      # exclusion for cmd/*.go — flag.* uses top-level globals there.)
