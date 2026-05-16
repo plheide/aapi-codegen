@@ -1,0 +1,71 @@
+---
+# Release workflow for aapi-codegen.
+#
+# What's special about this one (vs. the upstream plheide/go-jsonschema
+# release.yaml it's modelled on): aapi-codegen's go.mod has a
+# `replace github.com/atombender/go-jsonschema => ../go-jsonschema`
+# directive, so the build needs both repos checked out as siblings.
+# Two actions/checkout steps with `path:` set per repo set this up.
+#
+# Versions (AAPI_GJS_VERSION, GO_VERSION, ...) live in
+# .github/versions.env and are loaded into $GITHUB_ENV by the "Load
+# versions" step below. Same file is loaded by development.yaml,
+# guaranteeing CI and release build against identical versions.
+
+name: release
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+
+permissions:
+  contents: write
+concurrency:
+  group: ${{ github.workflow }} @ ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout aapi-codegen
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 1
+          path: aapi-codegen
+      - name: Load versions
+        # $GITHUB_ENV's format is strict KEY=VALUE only — comments and
+        # blank lines from versions.env would fail with "Invalid format".
+        # Filter to lines that look like environment-variable
+        # assignments before appending.
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' aapi-codegen/.github/versions.env >> "$GITHUB_ENV"
+      - name: Checkout go-jsonschema (sibling for the replace directive)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: ${{ env.AAPI_GJS_REPO }}
+          ref: ${{ env.AAPI_GJS_VERSION }}
+          path: go-jsonschema
+      - name: Fetch all aapi-codegen tags
+        working-directory: aapi-codegen
+        run: git fetch --force --tags
+      - name: Setup Golang
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # Sanity: smoke the build before goreleaser runs. Fast feedback
+      # if the replace target / Go version / module path drifted.
+      - name: Pre-flight build
+        working-directory: aapi-codegen
+        run: |
+          go mod tidy
+          go build ./...
+          go test ./...
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
+        with:
+          distribution: goreleaser
+          version: 2.15.4
+          workdir: aapi-codegen
+          args: release --verbose --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

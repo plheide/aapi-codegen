@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.com/widgetservice/common/v1/header.schema.json",
+  "title": "MessageHeader",
+  "description": "Synthetic message envelope used by aapi-codegen tests. Models the cross-tree shared-header pattern: every message embeds the same header type so tests can verify $ref resolution across schema files.",
+  "type": "object",
+  "required": ["traceID", "tenantID", "principal"],
+  "additionalProperties": false,
+  "properties": {
+    "traceID":   { "type": "string", "description": "Distributed-tracing identifier propagated end-to-end." },
+    "tenantID":  { "type": "string", "description": "Tenant the message belongs to." },
+    "principal": { "type": "string", "description": "Identifier of the caller that initiated the workflow." }
+  }
+}

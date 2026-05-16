@@ -1,0 +1,118 @@
+// Runtime assertions for the inline-payload + components.schemas
+// fixture. Dropped into the tmp module by inline_test.go and
+// executed via `go test`. Verifies that:
+//   - publishers built from inline payloads actually work end-to-end
+//     (a real fakeTransport sees the right exchange / routing key /
+//     body),
+//   - the shared components.schemas.Tag type is genuinely shared across
+//     payloads (an InlineMessage with two tags round-trips intact),
+//   - the `title` override correctly produces the InlineCancelMsg type
+//     and its routing key matches what the spec declares.
+//
+// Sentinel-distinct values (ROUTE-* args vs BODY-* body fields) catch
+// any regression where the publisher reads the routing key from the
+// payload body.
+
+package inlinev1
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+type fakeTransport struct {
+	exchange   string
+	routingKey string
+	body       []byte
+}
+
+func (f *fakeTransport) Publish(_ context.Context, exchange, routingKey string, body []byte) error {
+	f.exchange = exchange
+	f.routingKey = routingKey
+	f.body = append(f.body[:0], body...)
+	return nil
+}
+
+func TestPublisher_SendInline_InlineMessageRoundtrip(t *testing.T) {
+	ft := &fakeTransport{}
+	p := NewPublisher(ft)
+
+	msg := InlineMessage{
+		ID: "BODY-id",
+		Tags: []Tag{
+			{Key: "a", Value: "1"},
+			{Key: "b", Value: "2"},
+		},
+	}
+	if err := p.SendInline(context.Background(), "ROUTE-tenant", msg); err != nil {
+		t.Fatalf("SendInline: %v", err)
+	}
+	if ft.exchange != "InlineService" {
+		t.Errorf("exchange: got %q, want InlineService", ft.exchange)
+	}
+	if ft.routingKey != "ROUTE-tenant" {
+		t.Errorf("routingKey: got %q, want ROUTE-tenant (arg, not body)", ft.routingKey)
+	}
+	// Body carries the BODY-* sentinel and the shared Tag type
+	// round-trips through camelCase JSON.
+	if !strings.Contains(string(ft.body), `"id":"BODY-id"`) {
+		t.Errorf("body should contain camelCase id with BODY- sentinel: %s", ft.body)
+	}
+	var rt InlineMessage
+	if err := json.Unmarshal(ft.body, &rt); err != nil {
+		t.Fatalf("body roundtrip: %v", err)
+	}
+	if rt.ID != msg.ID {
+		t.Errorf("body.id roundtrip: got %q, want %q", rt.ID, msg.ID)
+	}
+	if len(rt.Tags) != 2 || rt.Tags[0].Key != "a" || rt.Tags[1].Value != "2" {
+		t.Errorf("body.tags roundtrip mismatch: %+v", rt.Tags)
+	}
+}
+
+func TestPublisher_SendInlineCancel_TitleOverride(t *testing.T) {
+	ft := &fakeTransport{}
+	p := NewPublisher(ft)
+
+	// The payload declared `title: InlineCancelMsg`, so the Go type
+	// name is InlineCancelMsg (overriding the default — which would
+	// have been InlineCancelMessage from the message key). The
+	// generated SendInlineCancel signature must reference this type.
+	msg := InlineCancelMsg{
+		ID:     "BODY-id",
+		Reason: "BODY-reason",
+		Tag:    &Tag{Key: "k", Value: "v"},
+	}
+	if err := p.SendInlineCancel(context.Background(), "ROUTE-tenant", msg); err != nil {
+		t.Fatalf("SendInlineCancel: %v", err)
+	}
+	if ft.routingKey != "ROUTE-tenant" {
+		t.Errorf("routingKey: got %q, want ROUTE-tenant", ft.routingKey)
+	}
+	// Body should carry the optional Tag (verifies components.schemas
+	// $ref resolved correctly inside the inline payload).
+	if !strings.Contains(string(ft.body), `"tag":{"key":"k","value":"v"}`) {
+		t.Errorf("body should contain serialized Tag: %s", ft.body)
+	}
+}
+
+// TestSharedTag_PreservesIdentityAcrossPayloads verifies the same
+// Tag values round-trip identically through both message types — if
+// components.schemas had been duplicated (one TagInline, one
+// TagInlineCancel), the JSON tags might silently differ.
+func TestSharedTag_PreservesIdentityAcrossPayloads(t *testing.T) {
+	tag := Tag{Key: "shared", Value: "value"}
+	inline := InlineMessage{ID: "x", Tags: []Tag{tag}}
+	cancel := InlineCancelMsg{ID: "y", Reason: "z", Tag: &tag}
+
+	inlineJSON, _ := json.Marshal(inline)
+	cancelJSON, _ := json.Marshal(cancel)
+	if !strings.Contains(string(inlineJSON), `"tags":[{"key":"shared","value":"value"}]`) {
+		t.Errorf("InlineMessage.Tags should serialize Tag identically; got %s", inlineJSON)
+	}
+	if !strings.Contains(string(cancelJSON), `"tag":{"key":"shared","value":"value"}`) {
+		t.Errorf("InlineCancelMsg.Tag should serialize Tag identically; got %s", cancelJSON)
+	}
+}

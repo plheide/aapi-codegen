@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.com/notificationservice/common/v1/header.schema.json",
+  "title": "EventHeader",
+  "description": "Synthetic header for the notification fixture. Distinct $id and Go type name from widgetservice's MessageHeader so cross-fixture isolation is preserved — proves aapi-codegen handles arbitrary header shapes, not just the one in the M1–M3 fixture.",
+  "type": "object",
+  "required": ["correlationID", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "correlationID": { "type": "string", "description": "Caller-supplied correlation identifier for tracing." },
+    "source":        { "type": "string", "description": "Identifier of the originating system." }
+  }
+}

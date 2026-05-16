@@ -1,0 +1,96 @@
+// Publisher acceptance assertions for the topic-exchange fixture. After
+// M5.5/Q2 dropped wire-compat shim emission, the previously-bundled
+// camelCase/PascalCase decoding tests are gone — those belong to a
+// hand-written compat.go in real consumers, not to the generator's
+// acceptance suite.
+
+package notificationv1
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+// fakeTransport mirrors the M3 widget fixture's helper. Local to this
+// package because Go test files can't share types across packages.
+type fakeTransport struct {
+	exchange   string
+	routingKey string
+	body       []byte
+}
+
+func (f *fakeTransport) Publish(_ context.Context, exchange, routingKey string, body []byte) error {
+	f.exchange = exchange
+	f.routingKey = routingKey
+	f.body = append(f.body[:0], body...)
+	return nil
+}
+
+func TestPublisher_SendNotification_TopicExchange(t *testing.T) {
+	ft := &fakeTransport{}
+	p := NewPublisher(ft)
+
+	// Sentinel-distinct values: arg ("ROUTE-...") is the only thing
+	// that should appear as the routing key; body fields all carry
+	// BODY-* sentinels. If a regression substitutes msg.EventCategory
+	// into the routing key (or vice versa), the assertions fail
+	// loudly.
+	msg := NotificationMessage{
+		Header:        EventHeader{CorrelationID: "BODY-corr", Source: "BODY-source"},
+		ID:            "BODY-id",
+		EventCategory: "BODY-category",
+		Body:          "BODY-payload",
+	}
+	if err := p.SendNotification(context.Background(), "ROUTE-category", msg); err != nil {
+		t.Fatalf("SendNotification: %v", err)
+	}
+	if ft.exchange != "NotificationExchange" {
+		t.Errorf("exchange: got %q, want NotificationExchange (topic)", ft.exchange)
+	}
+	if ft.routingKey != "ROUTE-category" {
+		t.Errorf("routingKey: got %q, want ROUTE-category (must come from arg, not body.EventCategory)", ft.routingKey)
+	}
+	if !strings.Contains(string(ft.body), `"id":"BODY-id"`) {
+		t.Errorf("body should contain camelCase id with BODY- sentinel: %s", ft.body)
+	}
+	if !strings.Contains(string(ft.body), `"eventCategory":"BODY-category"`) {
+		t.Errorf("body should preserve body.eventCategory (arg must not overwrite body): %s", ft.body)
+	}
+	if !strings.Contains(string(ft.body), `"correlationID":"BODY-corr"`) {
+		t.Errorf("body should contain camelCase header.correlationID with BODY- sentinel: %s", ft.body)
+	}
+}
+
+// Topic-routing patterns: the publisher does no validation — whatever
+// the caller passes lands as the routing key. Verify a few
+// representative shapes flow through end-to-end (arg → routing key,
+// body unaltered).
+func TestPublisher_SendNotification_RoutingKeyShapes(t *testing.T) {
+	cases := []string{
+		"security.audit",
+		"billing.invoice.paid",
+		"system",    // single segment
+		"a.b.c.d.e", // deep hierarchy
+	}
+	for _, key := range cases {
+		ft := &fakeTransport{}
+		p := NewPublisher(ft)
+		// body.EventCategory stays a fixed BODY-* sentinel so a
+		// regression that puts the body's eventCategory into the
+		// routing key fails the assertion with a wrong value.
+		msg := NotificationMessage{
+			Header:        EventHeader{CorrelationID: "BODY-corr", Source: "BODY-source"},
+			ID:            "BODY-id",
+			EventCategory: "BODY-category",
+			Body:          "BODY-payload",
+		}
+		if err := p.SendNotification(context.Background(), key, msg); err != nil {
+			t.Errorf("key %q: SendNotification: %v", key, err)
+			continue
+		}
+		if ft.routingKey != key {
+			t.Errorf("key %q: routingKey: got %q (must come from arg, not body)", key, ft.routingKey)
+		}
+	}
+}

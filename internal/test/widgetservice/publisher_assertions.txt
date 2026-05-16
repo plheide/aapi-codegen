@@ -1,0 +1,115 @@
+// Publisher acceptance assertions. Run inside the M3 tmp module after
+// aapi-codegen has emitted types.gen.go. Verifies that:
+//   - the generated Publisher struct + Transport interface are usable,
+//   - a templated address ({tenant}.{widgetType}) substitutes the
+//     positional arguments into the routing key,
+//   - a literal address (widget.cancellation) emits the constant key,
+//   - the body is the canonical camelCase JSON of the payload (the
+//     generated types have no UnmarshalJSON after M5.5/Q2; encoding
+//     uses stdlib json on the canonical tags).
+
+package widgetv1
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+// fakeTransport records the last Publish call. Lives in this _test.go
+// only — production code wraps a real *amqp091.Channel.
+type fakeTransport struct {
+	exchange   string
+	routingKey string
+	body       []byte
+}
+
+func (f *fakeTransport) Publish(_ context.Context, exchange, routingKey string, body []byte) error {
+	f.exchange = exchange
+	f.routingKey = routingKey
+	f.body = append(f.body[:0], body...)
+	return nil
+}
+
+func TestPublisher_SendWidgetMessage_TemplatedAddress(t *testing.T) {
+	ft := &fakeTransport{}
+	p := NewPublisher(ft)
+
+	// Sentinel-distinct values: args (`ROUTE-*`) vs body fields
+	// (`BODY-*`) cannot collide. If a generator regression starts
+	// reading the routing key from the body, the assertion fails
+	// loudly (routingKey == "BODY-tenant.BODY-widget" instead of
+	// "ROUTE-tenant.ROUTE-widget"). Without this distinction, an
+	// args-vs-body confusion would silently pass.
+	msg := WidgetMessage{
+		Header:     MessageHeader{TraceID: "trace-1", TenantID: "acme", Principal: "alice"},
+		ID:         "w-1",
+		WidgetType: "BODY-widget",
+		Tenant:     "BODY-tenant",
+	}
+	if err := p.SendWidgetMessage(context.Background(), "ROUTE-tenant", "ROUTE-widget", msg); err != nil {
+		t.Fatalf("SendWidgetMessage: %v", err)
+	}
+	if ft.exchange != "WidgetService" {
+		t.Errorf("exchange: got %q, want WidgetService", ft.exchange)
+	}
+	if ft.routingKey != "ROUTE-tenant.ROUTE-widget" {
+		t.Errorf("routingKey: got %q, want ROUTE-tenant.ROUTE-widget (must come from args, not body)", ft.routingKey)
+	}
+	// Body carries the BODY-* values verbatim — verifies the args
+	// didn't silently overwrite body fields either.
+	if !strings.Contains(string(ft.body), `"id":"w-1"`) {
+		t.Errorf("body should contain camelCase id: %s", ft.body)
+	}
+	if !strings.Contains(string(ft.body), `"tenant":"BODY-tenant"`) {
+		t.Errorf("body should preserve body.tenant (args must not overwrite body): %s", ft.body)
+	}
+	if !strings.Contains(string(ft.body), `"widgetType":"BODY-widget"`) {
+		t.Errorf("body should preserve body.widgetType (args must not overwrite body): %s", ft.body)
+	}
+	if !strings.Contains(string(ft.body), `"traceID":"trace-1"`) {
+		t.Errorf("body should contain camelCase header.traceID: %s", ft.body)
+	}
+	// Body roundtrip — verifies publisher output is self-consistent
+	// (camelCase tags round-trip).
+	var rt WidgetMessage
+	if err := json.Unmarshal(ft.body, &rt); err != nil {
+		t.Fatalf("body roundtrip: %v", err)
+	}
+	if rt.ID != msg.ID || rt.WidgetType != msg.WidgetType || rt.Tenant != msg.Tenant {
+		t.Errorf("body roundtrip mismatch: orig=%+v rt=%+v", msg, rt)
+	}
+	if rt.Header.TraceID != msg.Header.TraceID || rt.Header.TenantID != msg.Header.TenantID {
+		t.Errorf("header roundtrip mismatch: orig=%+v rt=%+v", msg.Header, rt.Header)
+	}
+}
+
+func TestPublisher_SendWidgetCancelMessage_LiteralAddress(t *testing.T) {
+	ft := &fakeTransport{}
+	p := NewPublisher(ft)
+
+	// For a literal address (no args), the body still gets BODY-*
+	// sentinel values. If a generator regression starts substituting
+	// body fields into the literal routing key (off-by-one in operation
+	// → address binding, etc.), the assertion fails because the routing
+	// key is no longer the literal.
+	msg := WidgetCancelMessage{
+		Header:     MessageHeader{TraceID: "trace-1", TenantID: "acme", Principal: "alice"},
+		WidgetID:   "BODY-widgetID",
+		Tenant:     "BODY-tenant",
+		WidgetType: "BODY-widget",
+	}
+	if err := p.SendWidgetCancelMessage(context.Background(), msg); err != nil {
+		t.Fatalf("SendWidgetCancelMessage: %v", err)
+	}
+	if ft.exchange != "WidgetService" {
+		t.Errorf("exchange: got %q, want WidgetService", ft.exchange)
+	}
+	if ft.routingKey != "widget.cancellation" {
+		t.Errorf("routingKey: got %q, want widget.cancellation (literal — body fields must not appear here)", ft.routingKey)
+	}
+	if !strings.Contains(string(ft.body), `"widgetID":"BODY-widgetID"`) {
+		t.Errorf("body should contain camelCase widgetID with BODY- sentinel: %s", ft.body)
+	}
+}

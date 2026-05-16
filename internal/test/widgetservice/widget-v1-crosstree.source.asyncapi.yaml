@@ -1,0 +1,70 @@
+# Variant of widget-v1.source.asyncapi.yaml that declares a cross-tree
+# schema-package mapping via the `x-aapi-codegen` spec extension. Used
+# by TestM2_2_CrossTreeImport to verify that aapi-codegen reads the
+# extension and routes header.schema.json's $id to the commonv1 Go
+# package instead of inlining the type.
+#
+# Identical to widget-v1.source.asyncapi.yaml except for the
+# x-aapi-codegen block at the bottom.
+
+asyncapi: 3.1.0
+info:
+  title: WidgetService — Widget Dispatch (cross-tree variant)
+  version: 1.0.0
+
+defaultContentType: application/json
+
+channels:
+  widgetDispatch:
+    address: '{tenant}.{widgetType}'
+    parameters:
+      tenant:      { description: Tenant identifier. }
+      widgetType:  { description: Worker family identifier (open enum). }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: WidgetService, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      WidgetMessage:
+        name: WidgetMessage
+        contentType: application/json
+        payload:
+          $ref: './schemas/widget/v1/widget-message.schema.json'
+
+  widgetCancellation:
+    address: widget.cancellation
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: WidgetService, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      WidgetCancelMessage:
+        name: WidgetCancelMessage
+        contentType: application/json
+        payload:
+          $ref: './schemas/widget/v1/widget-cancel-message.schema.json'
+
+operations:
+  sendWidgetMessage:
+    action: send
+    channel:
+      $ref: '#/channels/widgetDispatch'
+    messages:
+      - $ref: '#/channels/widgetDispatch/messages/WidgetMessage'
+  sendWidgetCancelMessage:
+    action: send
+    channel:
+      $ref: '#/channels/widgetCancellation'
+    messages:
+      - $ref: '#/channels/widgetCancellation/messages/WidgetCancelMessage'
+
+# aapi-codegen-specific tooling directives. The schema-packages list is
+# the canonical place to declare cross-tree $id → Go-package mappings:
+# colocated with the spec, no separate config file needed.
+x-aapi-codegen:
+  schema-packages:
+    - id: https://schemas.example.com/widgetservice/common/v1/header.schema.json
+      package: aapicodegen_acceptance_test/commonv1
+      alias: commonv1

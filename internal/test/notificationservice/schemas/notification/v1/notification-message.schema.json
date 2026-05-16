@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NotificationMessage",
+  "description": "Synthetic notification payload — published per event-category for topic-routing consumers.",
+  "type": "object",
+  "required": ["header", "id", "eventCategory", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "header":        { "$ref": "../../common/v1/header.schema.json" },
+    "id":            { "type": "string", "description": "Notification ID (UUID)." },
+    "eventCategory": { "type": "string", "description": "Event category; doubles as the topic-exchange routing key." },
+    "body":          { "type": "string", "description": "Notification payload body, free-form." },
+    "severity":      { "type": "string", "description": "Optional severity classifier (e.g. 'info', 'warn', 'error')." }
+  }
+}
