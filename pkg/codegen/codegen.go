@@ -456,6 +456,18 @@ func combineSections(jsonschemaSrc string, imports []string, aliasedImports [][2
 		file.Decls = newDecls
 	}
 
+	// Clear file.Comments: after the import rewrite, free-standing
+	// comments from the original source (template section dividers,
+	// godoc on top-level decls that landed between the now-removed
+	// imports and the first real decl) get positions that the printer
+	// can no longer align meaningfully — they end up sandwiched inside
+	// the new consolidated import block. Decl-bound doc comments
+	// survive because they're attached via the decl's Doc field, not
+	// the file's Comments slice. Empirically this is the cleanest fix
+	// for the "doc comment inside imports" cosmetic glitch in
+	// subscriber/publisher-only specs.
+	file.Comments = nil
+
 	// Print the rewritten AST, then gofmt for consistent spacing.
 	// printer alone respects positions; gofmt smoothes the result.
 	var buf bytes.Buffer
