@@ -2,6 +2,14 @@
 
 AsyncAPI 3.x → Go code generator. The AsyncAPI counterpart to `oapi-codegen` (same idea, different spec). Builds on `go-jsonschema` (imported as a library) for the JSON Schema → Go pass.
 
+Generates, from one `*.source.asyncapi.yaml`, one Go package containing:
+
+- **Payload types** for every message (via `go-jsonschema`).
+- **Typed Publisher** with `Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` per `action: send` operation (v0.1+).
+- **Typed Subscriber** with `<MessageName>Handler` interface + `Subscribe<MessageName>(ctx, ...params, handler) error` per `action: receive` operation (v0.2+).
+- **`PublishProperties`** + `SendOption` (`WithPriority`, `WithExpirationMillis`, …) honoring message/operation AMQP bindings (v0.3+).
+- **Typed channel parameters** — enums become `type X string` + const block (v0.4); pattern-validated parameters become `type X string` + `NewX`/`MustX` constructors that regex-check input (v0.4.1).
+
 ## Usage
 
 Minimal:
@@ -108,44 +116,60 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`sharedmsgservice/`](internal/test/sharedmsgservice/) | `components.messages` referenced from multiple channels |
 | [`messagecollisionservice/`](internal/test/messagecollisionservice/) | regression for inline + component-message keys colliding |
 | [`validationservice/`](internal/test/validationservice/) | `omit-validation` opt-out |
+| [`consumerservice/`](internal/test/consumerservice/) | **v0.2** — `action: receive`, `<Msg>Handler` interface, `Subscribe<Msg>`, `ErrDrop` semantics, queue-mode channels |
+| [`bindingsservice/`](internal/test/bindingsservice/) | **v0.3** — `SendOption` + message/operation AMQP bindings (priority, expiration, contentEncoding, messageType) |
+| [`enumparams/`](internal/test/enumparams/) | **v0.4** — typed channel parameters from `schema.type: string + enum`, dedup across publisher + subscriber |
+| [`validatedparams/`](internal/test/validatedparams/) | **v0.4.1** — pattern-validated parameters with `NewX`/`MustX` constructors; `omit-validation` falls back to plain `string` |
 
 ## Status
 
-aapi-codegen can be used today for publisher-side AMQP code generation from AsyncAPI 3.x specs. Subscriber-side (`action: receive`) and additional bindings are the main open scope.
+aapi-codegen covers both publisher and subscriber AMQP code generation from AsyncAPI 3.x specs. Other protocol bindings (Kafka, WebSocket) are the main open scope.
 
 ### AsyncAPI 3.x ([spec](https://www.asyncapi.com/docs/reference/specification/v3.1.0))
 
 - [x] `asyncapi: 3.x` version detection
-- [x] `info.title` (used in generated publisher doc comment)
+- [x] `info.title` (used in generated publisher/subscriber doc comment)
 - [x] `channels`
   - [x] `address` — literal (e.g. `widget.cancellation`)
   - [x] `address` — templated, multi-parameter (e.g. `{tenant}.{widgetType}`)
   - [x] `address` — templated, single-parameter (e.g. `{workflowName}`)
-  - [x] `parameters` — typed as `string` in publisher signatures (typed parameter schemas not yet inspected)
+  - [x] `parameters` — `string` by default; **v0.4** types from `schema.type: string + enum`; **v0.4.1** types from `schema.type: string + pattern` with `NewX`/`MustX` constructors
   - [x] `messages` — multi-message channels
   - [x] `bindings.amqp` — typed per channel
 - [x] `operations`
-  - [x] `action: send` — emits typed `Publisher.Send<MessageName>(ctx, ...params, msg)` methods
-  - [ ] `action: receive` — consumer / handler emission
+  - [x] `action: send` — emits typed `Publisher.Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` methods
+  - [x] `action: receive` — emits `<MessageName>Handler` interface + `Subscriber.Subscribe<MessageName>(ctx, ...params, handler) error` (**v0.2**)
   - [x] `operations.X.channel.$ref` — internal ref resolution
-  - [x] `operations.X.messages[].$ref` — internal ref resolution (exactly one message per operation in v1)
+  - [x] `operations.X.messages[].$ref` — internal ref resolution (exactly one message per operation)
 - [x] `components.schemas` — shared types declared once, referenced from multiple payloads via `#/components/schemas/X`
 - [x] `components.messages` — message-wrapper reuse via `#/components/messages/X`. Shared wrappers produce one Go payload type, not one per reference. Operation-level refs may target either `#/channels/.../messages/Y` (channel-scoped) or `#/components/messages/Y` (component-scoped).
 - [x] `messages.X.payload` via `$ref` to external JSON Schema file
 - [x] `messages.X.payload` inline (Go type name defaults to message key; inline `title` overrides)
 - [x] Spec extension `x-aapi-codegen.schema-packages` — cross-tree `$ref` → Go-import mapping
+- [x] Spec extension `x-aapi-codegen.omit-publishers` / `omit-subscribers` (**v0.2**) — opt out of either generated section even when the spec has matching operations
+- [ ] `oneOf` payload dispatch (typed `Send` method per discriminated variant) — IR has the placeholder; templates pending
 
 ### AMQP binding ([spec](https://github.com/asyncapi/bindings/tree/master/amqp))
 
 - [x] `exchange.name` — emitted as a string literal in the publisher body
-- [x] `exchange.type: direct`
-- [x] `exchange.type: topic`
-- [x] `exchange.type: fanout` (untested but should work — exchange type doesn't affect publisher emission, only consumer behaviour)
-- [x] `exchange.type: headers` (same)
-- [x] `bindingVersion` — preserved in IR for future use (not used in emission)
-- [x] Routing key derived from the channel's `address` (the binding's `is:` field is currently ignored; only routing-key-shaped addresses are supported in v1)
-- [ ] `is: queue` (queue-based addressing) not yet — would need IR + template branch
-- [ ] AMQP message-level bindings (properties, headers, ack mode) not yet
+- [x] `exchange.type: direct`, `topic`, `fanout`, `headers`
+- [x] `bindingVersion` — preserved in IR for future use
+- [x] `is: routingKey` — address is the routing key on Exchange (publisher mode)
+- [x] `is: queue` (**v0.2**) — address is the queue name; subscriber emits `Subscribe<Msg>` against `bindings.amqp.queue.{name, durable, autoDelete, exclusive}`
+- [x] Message-level bindings (**v0.3**): `contentEncoding`, `messageType`
+- [x] Operation-level bindings (**v0.3**): `priority`, `expiration`
+- [ ] AMQP delivery headers / correlation-id / reply-id surfaced to receive handlers — subscriber currently passes only `(ctx, routingKey, body)` to the dispatch wrapper
+
+### Generated runtime contracts (**v0.2+**, **v0.3+**)
+
+- **Publisher** ([example](internal/test/widgetservice/publisher_assertions.txt)):
+  - `Transport.Publish(ctx, exchange, routingKey string, body []byte, props PublishProperties) error` — adapt your `*amqp091.Channel` by wrapping it.
+  - `Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` — spec bindings become defaults; opts override per call.
+  - Helpers: `WithContentType`, `WithContentEncoding`, `WithMessageType`, `WithPriority`, `WithExpirationMillis`.
+- **Subscriber** ([example](internal/test/consumerservice/consumer_assertions.txt)):
+  - `SubscribeTransport.Subscribe(ctx, queueName, handler func(ctx, routingKey, body) error) error` — blocks until ctx cancellation or fatal transport error.
+  - `<MessageName>Handler.Handle<MessageName>(ctx, msg) error` — implement on your consumer.
+  - **Ack semantics**: `nil` → ack; `errors.Is(err, ErrDrop)` → nack-no-requeue (poison); any other err → nack-with-requeue. The dispatch wrapper joins `json.Unmarshal` failures with `ErrDrop` so malformed payloads can never loop forever.
 
 ### Other protocol bindings
 
