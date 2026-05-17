@@ -72,6 +72,22 @@ channels:
             id:     { type: string }
             reason: { type: string }
             tag:    { $ref: '#/components/schemas/Tag' }
+      InlineAuditMessage:
+        name: InlineAuditMessage
+        contentType: application/json
+        # Inline payload with a $ref to an external sibling schema file.
+        # The relative path is relative to THIS spec file's directory;
+        # the materializer absolutises it so the synthetic file (which
+        # lives under tmpDir) can still resolve the target. Regression
+        # guard for the "cross-tree file ref inside inline payload"
+        # case that faservices specs use.
+        payload:
+          type: object
+          required: [id, audit]
+          additionalProperties: false
+          properties:
+            id:    { type: string }
+            audit: { $ref: './external/audit-id.schema.json' }
 
 operations:
   sendInline:
@@ -86,3 +102,9 @@ operations:
       $ref: '#/channels/inlineDispatch'
     messages:
       - $ref: '#/channels/inlineDispatch/messages/InlineCancelMessage'
+  sendInlineAudit:
+    action: send
+    channel:
+      $ref: '#/channels/inlineDispatch'
+    messages:
+      - $ref: '#/channels/inlineDispatch/messages/InlineAuditMessage'

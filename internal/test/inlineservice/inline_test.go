@@ -41,9 +41,14 @@ func TestQ4_InlinePayloadsAndComponents(t *testing.T) {
 
 	// Type names: derived from message keys, with explicit title override.
 	for _, want := range []string{
-		"type InlineMessage struct",   // message key → Go type name
-		"type InlineCancelMsg struct", // explicit title overrides message key
-		"type Tag struct",             // components.schemas entry
+		"type InlineMessage struct",      // message key → Go type name
+		"type InlineCancelMsg struct",    // explicit title overrides message key
+		"type Tag struct",                // components.schemas entry
+		"type InlineAuditMessage struct", // inline payload with cross-tree file $ref
+		"type AuditID struct",            // target of that cross-tree $ref — proves
+		// rewriteRefs absolutised the relative path so go-jsonschema could
+		// follow it from the synthetic tmp file. Regression guard for the
+		// "inline-payload + cross-tree file ref" case faservices specs use.
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated file missing %q\n--- file ---\n%s", want, src)
@@ -67,6 +72,7 @@ func TestQ4_InlinePayloadsAndComponents(t *testing.T) {
 	for _, want := range []string{
 		"func (p *Publisher) SendInline(",
 		"func (p *Publisher) SendInlineCancel(",
+		"func (p *Publisher) SendInlineAudit(",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated file missing publisher method %q", want)
