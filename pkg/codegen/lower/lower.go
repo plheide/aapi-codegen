@@ -21,7 +21,15 @@ import (
 // both `action: send` (publisher) and `action: receive` (subscriber)
 // operations. Operation iteration order is alphabetical by operation
 // key for deterministic output (Go map iteration is randomised).
-func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
+//
+// omitValidation, when true, suppresses runtime parameter pattern
+// validation (parameters with `schema.pattern` fall back to plain
+// `string`). Enum parameters are unaffected — they're compile-time
+// type safety, not runtime validation. The flag mirrors the
+// `x-aapi-codegen.omit-validation` spec extension semantics: when the
+// consumer has opted out of generated validation, parameter pattern
+// checks are skipped along with the payload UnmarshalJSON checks.
+func Lower(packageName string, doc *loader.Document, omitValidation bool) (*ir.Spec, error) {
 	spec := &ir.Spec{
 		PackageName: packageName,
 		DocTitle:    doc.Info.Title,
@@ -31,7 +39,7 @@ func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 		if op.Action != "send" && op.Action != "receive" {
 			return nil, fmt.Errorf("operation %q: unsupported action %q (expected \"send\" or \"receive\")", opName, op.Action)
 		}
-		lowered, err := lowerOperation(doc, opName, op, spec)
+		lowered, err := lowerOperation(doc, opName, op, spec, omitValidation)
 		if err != nil {
 			return nil, fmt.Errorf("operation %q: %w", opName, err)
 		}
@@ -40,7 +48,7 @@ func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 	return spec, nil
 }
 
-func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, spec *ir.Spec) (*ir.Operation, error) {
+func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, spec *ir.Spec, omitValidation bool) (*ir.Operation, error) {
 	chName, err := refLastSegment(op.Channel.Ref, "#/channels/")
 	if err != nil {
 		return nil, fmt.Errorf("channel ref: %w", err)
@@ -49,7 +57,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, s
 	if !ok {
 		return nil, fmt.Errorf("channel %q not declared", chName)
 	}
-	ch, err := lowerChannel(chName, rawCh, spec)
+	ch, err := lowerChannel(chName, rawCh, spec, omitValidation)
 	if err != nil {
 		return nil, fmt.Errorf("channel %q: %w", chName, err)
 	}
@@ -118,7 +126,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, s
 	return out, nil
 }
 
-func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec) (*ir.Channel, error) {
+func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidation bool) (*ir.Channel, error) {
 	addr, err := ir.ParseAddress(raw.Address)
 	if err != nil {
 		return nil, err
@@ -127,29 +135,86 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec) (*ir.Channel,
 	if err != nil {
 		return nil, err
 	}
-	// v0.4: walk each address parameter; if the spec declares an enum
-	// schema for it, override the AddressParam's GoType and register
-	// the enum type globally on the spec.
+	// v0.4 / v0.4.1: walk each address parameter; if the spec declares
+	// an enum or pattern schema for it, override the AddressParam's
+	// GoType and register the type globally on the spec. Enum wins over
+	// pattern (a closed enum makes the pattern redundant); pattern
+	// wrapping is skipped entirely when omitValidation is on.
 	for i, p := range addr.Params {
 		paramDef, ok := raw.Parameters[p.JSONName]
 		if !ok || paramDef == nil {
 			continue
 		}
-		enum, ok := parameterEnum(paramDef.Schema)
-		if !ok {
+		typeName := pascalize(p.JSONName)
+		if enum, ok := parameterEnum(paramDef.Schema); ok {
+			if err := registerParameterEnum(spec, typeName, enum); err != nil {
+				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
+			}
+			addr.Params[i].GoType = typeName
 			continue
 		}
-		typeName := pascalize(p.JSONName)
-		if err := registerParameterEnum(spec, typeName, enum); err != nil {
-			return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
+		if omitValidation {
+			continue
 		}
-		addr.Params[i].GoType = typeName
+		if pattern, ok := parameterPattern(paramDef.Schema); ok {
+			if err := registerParameterPattern(spec, typeName, pattern); err != nil {
+				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
+			}
+			addr.Params[i].GoType = typeName
+		}
 	}
 	return &ir.Channel{
 		Name:    name,
 		Address: addr,
 		Binding: binding,
 	}, nil
+}
+
+// parameterPattern returns the regex from a `{type: string, pattern: ...}`
+// parameter schema, or ("", false) when the schema isn't that shape.
+// $ref-based schemas are deliberately not followed — v0.4.1 only handles
+// inline patterns to keep the surface narrow.
+func parameterPattern(schema map[string]any) (string, bool) {
+	if schema == nil {
+		return "", false
+	}
+	if t, _ := schema["type"].(string); t != "string" {
+		return "", false
+	}
+	pat, _ := schema["pattern"].(string)
+	if pat == "" {
+		return "", false
+	}
+	return pat, true
+}
+
+// registerParameterPattern adds the typed-pattern wrapper to
+// spec.ParameterPatterns, deduping on GoTypeName. Two parameters that
+// lower to the same type name must declare the same pattern; otherwise
+// the spec contradicts itself and emission would yield two
+// conflicting regex constants on one type.
+func registerParameterPattern(spec *ir.Spec, typeName, pattern string) error {
+	for _, existing := range spec.ParameterPatterns {
+		if existing.GoTypeName != typeName {
+			continue
+		}
+		if existing.Pattern != pattern {
+			return fmt.Errorf("pattern type %q declared with conflicting regexes (%q vs %q) — rename one parameter or align the patterns", typeName, existing.Pattern, pattern)
+		}
+		return nil
+	}
+	// Same GoTypeName already used by an enum parameter is a clearer
+	// problem to surface than letting both blocks emit and conflict.
+	for _, e := range spec.ParameterEnums {
+		if e.GoTypeName == typeName {
+			return fmt.Errorf("type %q is already declared as an enum — a parameter cannot be typed as both enum and pattern on the same name", typeName)
+		}
+	}
+	spec.ParameterPatterns = append(spec.ParameterPatterns, &ir.ParameterPattern{
+		GoTypeName: typeName,
+		Pattern:    pattern,
+	})
+	return nil
 }
 
 // parameterEnum returns the string-enum values declared on a parameter

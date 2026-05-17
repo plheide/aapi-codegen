@@ -149,7 +149,7 @@ func Generate(specPath string, cfg Config) (string, error) {
 	// Phase 2: lower spec → IR; render publishers (one Send method per
 	// `action: send` operation). When the spec has no send operations,
 	// the publisher section is empty and no extra imports get pulled in.
-	spec, err := lower.Lower(cfg.Package, doc)
+	spec, err := lower.Lower(cfg.Package, doc, cfg.OmitValidation)
 	if err != nil {
 		return "", fmt.Errorf("lower: %w", err)
 	}
@@ -185,6 +185,13 @@ func Generate(specPath string, cfg Config) (string, error) {
 		return "", fmt.Errorf("read go-jsonschema output: %w", err)
 	}
 	imports := neededImports(publisherSection, subscriberSection)
+	if len(spec.ParameterPatterns) > 0 {
+		// Pattern wrappers need fmt (constructor's Errorf) and regexp
+		// (MustCompile + MatchString). fmt is already pulled in by
+		// publisher/subscriber whenever those sections render; add it
+		// here too in case the spec is parameters-only (rare but possible).
+		imports = append(imports, "fmt", "regexp")
+	}
 	combined, err := combineSections(string(jsonschemaOut), imports, []string{enumSection, publisherSection, subscriberSection}, cfg.Package)
 	if err != nil {
 		return "", err

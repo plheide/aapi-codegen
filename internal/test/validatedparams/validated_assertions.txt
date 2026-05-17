@@ -1,0 +1,123 @@
+// Runtime assertions for v0.4.1 pattern-validated parameters.
+
+package validatedparamsv1
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+type recPub struct {
+	exchange, routingKey string
+}
+
+func (r *recPub) Publish(_ context.Context, exchange, routingKey string, _ []byte, _ PublishProperties) error {
+	r.exchange = exchange
+	r.routingKey = routingKey
+	return nil
+}
+
+type recSub struct {
+	queue string
+}
+
+func (r *recSub) Subscribe(_ context.Context, queueName string,
+	_ func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue = queueName
+	return nil
+}
+
+// TestNewShardID_AcceptsValid: a value matching the pattern
+// constructs cleanly.
+func TestNewShardID_AcceptsValid(t *testing.T) {
+	got, err := NewShardID("shard-00001")
+	if err != nil {
+		t.Fatalf("NewShardID(shard-00001): %v", err)
+	}
+	if string(got) != "shard-00001" {
+		t.Errorf("typed value = %q", got)
+	}
+}
+
+// TestNewShardID_RejectsInvalid: pattern mismatches return a
+// descriptive error that names the type and the bad input.
+func TestNewShardID_RejectsInvalid(t *testing.T) {
+	cases := []string{"shrd-00001", "shard-0001", "shard-000001", "", "SHARD-00001"}
+	for _, tc := range cases {
+		_, err := NewShardID(tc)
+		if err == nil {
+			t.Errorf("NewShardID(%q) should fail", tc)
+			continue
+		}
+		if !strings.Contains(err.Error(), "ShardID") || !strings.Contains(err.Error(), tc) {
+			t.Errorf("NewShardID(%q) error %q should mention type + input", tc, err.Error())
+		}
+	}
+}
+
+// TestMustShardID_PanicsOnInvalid: Must variant panics with
+// the same error message NewX would have returned.
+func TestMustShardID_PanicsOnInvalid(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("MustShardID should panic on bad input")
+		}
+		err, ok := r.(error)
+		if !ok {
+			t.Fatalf("panic value should be error, got %T (%v)", r, r)
+		}
+		if !errors.Is(err, err) || !strings.Contains(err.Error(), "ShardID") {
+			t.Errorf("panic message should reference ShardID: %v", err)
+		}
+	}()
+	_ = MustShardID("nope")
+}
+
+// TestMustShardID_HappyPath: valid input returns the typed value.
+func TestMustShardID_HappyPath(t *testing.T) {
+	got := MustShardID("shard-00042")
+	if string(got) != "shard-00042" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestSendPartition_FlowsTypedValue: the typed wrapper flows through
+// the publisher signature → routing key unchanged.
+func TestSendPartition_FlowsTypedValue(t *testing.T) {
+	tr := &recPub{}
+	if err := NewPublisher(tr).SendPartition(context.Background(),
+		MustShardID("shard-00001"),
+		"nightly-report-1",
+		PartitionMessage{ID: "p-1"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.routingKey != "shard-00001.nightly-report-1" {
+		t.Errorf("routingKey = %q, want shard-00001.nightly-report-1", tr.routingKey)
+	}
+}
+
+// TestSubscribeResult_DedupesType: the SAME ShardID type is
+// used by the receive op (proves the lowerer dedup works) — and the
+// queue-name builder wraps it with string() for `+` concatenation.
+func TestSubscribeResult_DedupesType(t *testing.T) {
+	tr := &recSub{}
+	type fn func(ctx context.Context, msg ResultMessage) error
+	var h fn = func(_ context.Context, _ ResultMessage) error { return nil }
+	if err := NewSubscriber(tr).SubscribeResultMessage(context.Background(),
+		MustShardID("shard-99999"),
+		resultHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "shard-99999.results" {
+		t.Errorf("queue = %q, want shard-99999.results", tr.queue)
+	}
+}
+
+type resultHandlerAdapter func(ctx context.Context, msg ResultMessage) error
+
+func (a resultHandlerAdapter) HandleResultMessage(ctx context.Context, msg ResultMessage) error {
+	return a(ctx, msg)
+}
