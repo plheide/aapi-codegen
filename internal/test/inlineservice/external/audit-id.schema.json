@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuditID",
+  "description": "Synthetic external schema living outside the spec file, referenced from an inline payload via a relative file $ref. Exercises the cross-tree-file-ref-in-inline-payload code path (Q4 + materialize.go absolutise-relative-refs fix).",
+  "type": "object",
+  "required": ["traceID", "issuedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "traceID":  { "type": "string", "description": "Trace identifier." },
+    "issuedAt": { "type": "string", "description": "Issuance timestamp." }
+  }
+}

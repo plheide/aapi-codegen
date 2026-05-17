@@ -52,6 +52,11 @@ func (d *Document) Materialize(tmpDir string) error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
+	// Relative file refs in inline content were originally relative to
+	// the spec file. Pass the spec's directory to rewriteRefs so it
+	// can absolutise them — the synthetic files live in tmpDir, where
+	// those relative paths wouldn't resolve.
+	specDir := filepath.Dir(d.SourcePath)
 
 	// Components first: payloads' refs point at component files, so
 	// the files must exist by the time go-jsonschema tries to resolve.
@@ -62,7 +67,7 @@ func (d *Document) Materialize(tmpDir string) error {
 				return fmt.Errorf("components.schemas.%s: not an object", name)
 			}
 			withTitle := injectTitle(schema, name)
-			rewriteComponentRefs(withTitle, componentsDir, componentsDir)
+			rewriteRefs(withTitle, componentsDir, componentsDir, specDir)
 			path := filepath.Join(componentsDir, name+".schema.json")
 			if err := writeJSON(path, withTitle); err != nil {
 				return err
@@ -131,7 +136,7 @@ func (d *Document) Materialize(tmpDir string) error {
 			}
 			schema := copyMap(msg.Payload.Inline)
 			withTitle := injectTitle(schema, titleSource)
-			rewriteComponentRefs(withTitle, fileDir, componentsDir)
+			rewriteRefs(withTitle, fileDir, componentsDir, specDir)
 			if err := writeJSON(path, withTitle); err != nil {
 				return err
 			}
@@ -169,18 +174,25 @@ func injectTitle(schema map[string]any, defaultTitle string) map[string]any {
 	return schema
 }
 
-// rewriteComponentRefs walks the schema tree (in place) and rewrites
-// `$ref` strings of the form `#/components/schemas/X` to relative file
-// paths pointing into componentsDir, computed from fromDir. External-
-// file refs (`./...`, `../...`, http://...) and other internal refs
-// (`#/$defs/...`) are left untouched.
+// rewriteRefs walks the schema tree (in place) and rewrites two
+// classes of `$ref` strings so that go-jsonschema's filesystem resolver
+// finds the targets from the synthetic file's location:
 //
-// fromDir is the directory the file being rewritten will live in;
-// componentsDir is where the target component schemas live. The
-// relative path is derived once via filepath.Rel and threaded down the
-// recursion as componentsRel — all refs in a single file share the
-// same base.
-func rewriteComponentRefs(node any, fromDir, componentsDir string) {
+//  1. `#/components/schemas/X` → relative path into componentsDir
+//     (`../components/X.schema.json` etc.), computed from fromDir.
+//  2. Relative file refs (`./...`, `../...`, no scheme) → absolute
+//     path. The original ref was relative to specDir (the spec file's
+//     directory); after materialization the schema lives in a tmp dir
+//     where that relative path no longer resolves. Making it absolute
+//     keeps it valid regardless of where the synthetic file lands.
+//     Any `#fragment` suffix is preserved.
+//
+// Untouched:
+//   - Other internal refs (`#/$defs/...`, `#/properties/...`) — they're
+//     resolved within the schema itself.
+//   - http:// / https:// URLs — go-jsonschema's loader handles those.
+//   - Already-absolute file paths — by definition still valid.
+func rewriteRefs(node any, fromDir, componentsDir, specDir string) {
 	componentsRel, err := filepath.Rel(fromDir, componentsDir)
 	if err != nil {
 		// fromDir and componentsDir are always tmpDir-rooted siblings
@@ -190,36 +202,68 @@ func rewriteComponentRefs(node any, fromDir, componentsDir string) {
 		// "ref not resolved" error from go-jsonschema.
 		return
 	}
-	rewriteComponentRefsRecursive(node, componentsRel)
+	rewriteRefsRecursive(node, componentsRel, specDir)
 }
 
-func rewriteComponentRefsRecursive(node any, componentsRel string) {
+func rewriteRefsRecursive(node any, componentsRel, specDir string) {
 	switch n := node.(type) {
 	case map[string]any:
 		for k, v := range n {
 			if k == "$ref" {
 				if s, ok := v.(string); ok {
-					n[k] = rewriteOneRef(s, componentsRel)
+					n[k] = rewriteOneRef(s, componentsRel, specDir)
 				}
 				continue
 			}
-			rewriteComponentRefsRecursive(v, componentsRel)
+			rewriteRefsRecursive(v, componentsRel, specDir)
 		}
 	case []any:
 		for _, item := range n {
-			rewriteComponentRefsRecursive(item, componentsRel)
+			rewriteRefsRecursive(item, componentsRel, specDir)
 		}
 	}
 }
 
 const componentsRefPrefix = "#/components/schemas/"
 
-func rewriteOneRef(ref, componentsRel string) string {
-	if !strings.HasPrefix(ref, componentsRefPrefix) {
+func rewriteOneRef(ref, componentsRel, specDir string) string {
+	// 1. components.schemas rewriting (existing behaviour).
+	if strings.HasPrefix(ref, componentsRefPrefix) {
+		name := ref[len(componentsRefPrefix):]
+		return filepath.Join(componentsRel, name+".schema.json")
+	}
+	// 2. Other internal refs (`#/$defs/X`, etc.) — schema-scoped,
+	//    resolve within the same file, no rewriting needed.
+	if strings.HasPrefix(ref, "#") {
 		return ref
 	}
-	name := ref[len(componentsRefPrefix):]
-	return filepath.Join(componentsRel, name+".schema.json")
+	// 3. URLs (http/https) — go-jsonschema's HTTP loader or pre-loaded
+	//    cache handles these.
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return ref
+	}
+	// 4. Already absolute file path — still resolves from anywhere.
+	path, fragment := ref, ""
+	if i := strings.Index(ref, "#"); i >= 0 {
+		path, fragment = ref[:i], ref[i:]
+	}
+	if filepath.IsAbs(path) {
+		return ref
+	}
+	// 5. Relative file path — resolve against the spec file's
+	//    directory. Originally the ref was relative to the spec
+	//    (because the schema content was inline in the spec YAML, or
+	//    in components.schemas); after materialization the synthetic
+	//    file is somewhere under tmpDir, where the relative path
+	//    wouldn't resolve. Absolute path stays valid regardless.
+	abs, err := filepath.Abs(filepath.Join(specDir, path))
+	if err != nil {
+		// Same fallback rationale as the filepath.Rel call above —
+		// returning the original ref produces a clearer downstream
+		// error than panicking.
+		return ref
+	}
+	return abs + fragment
 }
 
 // asMap accepts either map[string]any (the standard yaml.v3 inline
