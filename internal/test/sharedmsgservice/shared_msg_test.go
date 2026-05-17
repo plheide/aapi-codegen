@@ -97,7 +97,7 @@ type fakeTransport struct {
 	body       []byte
 }
 
-func (f *fakeTransport) Publish(_ context.Context, exchange, routingKey string, body []byte) error {
+func (f *fakeTransport) Publish(_ context.Context, exchange, routingKey string, body []byte, _ PublishProperties) error {
 	f.exchange = exchange
 	f.routingKey = routingKey
 	f.body = append(f.body[:0], body...)

@@ -1,0 +1,77 @@
+asyncapi: 3.1.0
+info:
+  title: BindingsService — v0.3 message-level + operation-level AMQP bindings
+  version: 1.0.0
+  description: |
+    Synthetic fixture for v0.3 — `bindings.amqp` on messages and
+    operations becomes the default PublishProperties for the generated
+    Send method, and per-call SendOption args (WithPriority,
+    WithExpirationMillis, ...) override those defaults.
+
+defaultContentType: application/json
+
+channels:
+  jobDispatch:
+    address: '{tenant}'
+    parameters:
+      tenant: { description: Tenant identifier. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: JobsExchange
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      JobMessage:
+        name: JobMessage
+        contentType: application/json
+        bindings:
+          amqp:
+            contentEncoding: utf-8
+            messageType: jobs.dispatch.v1
+            bindingVersion: 0.3.0
+        payload:
+          type: object
+          required: [id]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+
+  notificationDispatch:
+    address: notify
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: Notifications
+          type: fanout
+        bindingVersion: 0.3.0
+    messages:
+      Notify:
+        name: Notify
+        contentType: application/json
+        payload:
+          type: object
+          required: [text]
+          additionalProperties: false
+          properties:
+            text: { type: string }
+
+operations:
+  sendJob:
+    action: send
+    channel: { $ref: '#/channels/jobDispatch' }
+    bindings:
+      amqp:
+        priority: 5
+        expiration: 60000
+        bindingVersion: 0.3.0
+    messages:
+      - $ref: '#/channels/jobDispatch/messages/JobMessage'
+  sendNotify:
+    # No bindings on this op or message: proves the zero-default path.
+    action: send
+    channel: { $ref: '#/channels/notificationDispatch' }
+    messages:
+      - $ref: '#/channels/notificationDispatch/messages/Notify'

@@ -74,6 +74,15 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (
 		Channel: ch,
 		Message: msg,
 	}
+	// Publish defaults: spec-declared AMQP message + operation bindings
+	// the Send method materialises into the default PublishProperties.
+	// Only applies to send operations — receive doesn't publish.
+	if op.Action == "send" {
+		defaults := lowerPublishDefaults(doc.DefaultContentType, rawMsg, op)
+		if defaults != nil {
+			out.PublishDefaults = defaults
+		}
+	}
 	if op.Action == "send" {
 		// Publisher convention: GoFuncName = pascalize(opName). Operation
 		// keys like "sendWidgetMessage" already encode the verb; mapping
@@ -123,6 +132,116 @@ func lowerChannel(name string, raw *loader.Channel) (*ir.Channel, error) {
 		Address: addr,
 		Binding: binding,
 	}, nil
+}
+
+// lowerPublishDefaults pulls AMQP message + operation binding values
+// into the typed IR shape the publisher template materialises as
+// default PublishProperties. Returns nil when no field is set so the
+// generated Send can keep the simplest possible default-zero block.
+//
+// Per AsyncAPI 3.x AMQP binding spec:
+//   - messages.<X>.bindings.amqp.{contentEncoding, messageType}
+//   - operations.<X>.bindings.amqp.{expiration, priority}
+//
+// ContentType falls back to defaultContentType (top-level spec field)
+// when not explicitly set on the message.
+func lowerPublishDefaults(defaultContentType string, msg *loader.Message, op *loader.Operation) *ir.PublishDefaults {
+	out := &ir.PublishDefaults{}
+	any := false
+
+	if msg.ContentType != "" {
+		out.ContentType = msg.ContentType
+		any = true
+	} else if defaultContentType != "" {
+		out.ContentType = defaultContentType
+		any = true
+	}
+
+	if msgAMQP := amqpBinding(msg.Bindings); msgAMQP != nil {
+		if v, _ := msgAMQP["contentEncoding"].(string); v != "" {
+			out.ContentEncoding = v
+			any = true
+		}
+		if v, _ := msgAMQP["messageType"].(string); v != "" {
+			out.MessageType = v
+			any = true
+		}
+	}
+	if opAMQP := amqpBinding(op.Bindings); opAMQP != nil {
+		if p, ok := opAMQP["priority"]; ok {
+			if u, ok := coerceUint8(p); ok {
+				out.Priority = &u
+				any = true
+			}
+		}
+		// Expiration may be a string ("60000") or a number (60000) in
+		// the source YAML; the AMQP wire format is a string. Coerce both.
+		if e, ok := opAMQP["expiration"]; ok {
+			out.Expiration = coerceString(e)
+			if out.Expiration != "" {
+				any = true
+			}
+		}
+	}
+	if !any {
+		return nil
+	}
+	return out
+}
+
+// amqpBinding extracts the `amqp` entry from a bindings map, returning
+// nil when the bindings block is absent or the amqp entry is missing or
+// wrong-shaped. Centralised so message-level and operation-level
+// bindings share one lookup with consistent tolerance.
+func amqpBinding(bindings map[string]any) map[string]any {
+	if bindings == nil {
+		return nil
+	}
+	raw, ok := bindings["amqp"]
+	if !ok {
+		return nil
+	}
+	m, _ := raw.(map[string]any)
+	return m
+}
+
+func coerceUint8(v any) (uint8, bool) {
+	switch n := v.(type) {
+	case int:
+		if n >= 0 && n <= 255 {
+			return uint8(n), true
+		}
+	case int64:
+		if n >= 0 && n <= 255 {
+			return uint8(n), true
+		}
+	case uint64:
+		if n <= 255 {
+			return uint8(n), true
+		}
+	case float64:
+		if n >= 0 && n <= 255 && float64(uint8(n)) == n {
+			return uint8(n), true
+		}
+	}
+	return 0, false
+}
+
+func coerceString(v any) string {
+	switch n := v.(type) {
+	case string:
+		return n
+	case int:
+		return fmt.Sprintf("%d", n)
+	case int64:
+		return fmt.Sprintf("%d", n)
+	case uint64:
+		return fmt.Sprintf("%d", n)
+	case float64:
+		// AMQP expirations are always integer milliseconds; truncate.
+		return fmt.Sprintf("%d", int64(n))
+	}
+	return ""
 }
 
 // lowerAMQPBinding reads the `bindings.amqp` stanza out of the loader's

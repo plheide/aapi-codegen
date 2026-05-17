@@ -103,12 +103,16 @@ type Message struct {
 	// component's fields into this struct, and sets CanonicalName.
 	// Spec authors can't mix Ref with inline fields — the resolver
 	// rejects that.
-	Ref         string  `yaml:"$ref,omitempty"`
-	Name        string  `yaml:"name,omitempty"`
-	Title       string  `yaml:"title,omitempty"`
-	Summary     string  `yaml:"summary,omitempty"`
-	ContentType string  `yaml:"contentType,omitempty"`
-	Payload     Payload `yaml:"payload"`
+	Ref         string         `yaml:"$ref,omitempty"`
+	Name        string         `yaml:"name,omitempty"`
+	Title       string         `yaml:"title,omitempty"`
+	Summary     string         `yaml:"summary,omitempty"`
+	ContentType string         `yaml:"contentType,omitempty"`
+	Payload     Payload        `yaml:"payload"`
+	// Bindings is the raw `messages.X.bindings` map, surfaced to the
+	// lowerer which extracts message-level AMQP fields (contentEncoding,
+	// messageType) for publisher property defaults. v0.3+.
+	Bindings map[string]any `yaml:"bindings,omitempty"`
 
 	// CanonicalName is set by the resolver to the
 	// `components.messages.<Name>` key when this message was resolved
@@ -132,11 +136,15 @@ type Payload struct {
 }
 
 type Operation struct {
-	Action  string                  `yaml:"action"` // "send" | "receive"
-	Channel OperationChannelRef     `yaml:"channel"`
-	Title   string                  `yaml:"title,omitempty"`
-	Summary string                  `yaml:"summary,omitempty"`
-	Messages []OperationMessageRef  `yaml:"messages,omitempty"`
+	Action   string                `yaml:"action"` // "send" | "receive"
+	Channel  OperationChannelRef   `yaml:"channel"`
+	Title    string                `yaml:"title,omitempty"`
+	Summary  string                `yaml:"summary,omitempty"`
+	Messages []OperationMessageRef `yaml:"messages,omitempty"`
+	// Bindings is the raw `operations.X.bindings` map, surfaced to the
+	// lowerer which extracts operation-level AMQP fields (priority,
+	// expiration) for publisher property defaults. v0.3+.
+	Bindings map[string]any `yaml:"bindings,omitempty"`
 }
 
 // OperationChannelRef is the typed shape of `operations.X.channel.$ref`.

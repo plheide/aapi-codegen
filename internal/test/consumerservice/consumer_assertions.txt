@@ -198,6 +198,6 @@ func TestPublisher_StillWorksAlongsideSubscriber(t *testing.T) {
 
 type publishFn func(ctx context.Context, exchange, routingKey string, body []byte) error
 
-func (f publishFn) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+func (f publishFn) Publish(ctx context.Context, exchange, routingKey string, body []byte, _ PublishProperties) error {
 	return f(ctx, exchange, routingKey, body)
 }
