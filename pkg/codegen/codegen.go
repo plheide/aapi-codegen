@@ -167,6 +167,17 @@ func Generate(specPath string, cfg Config) (string, error) {
 			return "", fmt.Errorf("render subscriber: %w", err)
 		}
 	}
+	// v0.4: parameter-enum types. Render only if something else is also
+	// being rendered (the enums are only referenced by Publisher /
+	// Subscriber signatures; emitting them in isolation would yield
+	// dead code).
+	var enumSection string
+	if publisherSection != "" || subscriberSection != "" {
+		enumSection, err = RenderParameterEnums(spec)
+		if err != nil {
+			return "", fmt.Errorf("render parameter enums: %w", err)
+		}
+	}
 
 	// Phase 3: combine, inject imports, gofmt, write.
 	jsonschemaOut, err := os.ReadFile(tmpOut)
@@ -174,7 +185,7 @@ func Generate(specPath string, cfg Config) (string, error) {
 		return "", fmt.Errorf("read go-jsonschema output: %w", err)
 	}
 	imports := neededImports(publisherSection, subscriberSection)
-	combined, err := combineSections(string(jsonschemaOut), imports, []string{publisherSection, subscriberSection}, cfg.Package)
+	combined, err := combineSections(string(jsonschemaOut), imports, []string{enumSection, publisherSection, subscriberSection}, cfg.Package)
 	if err != nil {
 		return "", err
 	}

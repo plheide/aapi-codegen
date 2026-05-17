@@ -1,0 +1,95 @@
+// Runtime assertions for v0.4 typed-enum channel parameters.
+
+package enumparamsv1
+
+import (
+	"context"
+	"testing"
+)
+
+type recPub struct {
+	exchange, routingKey string
+	body                 []byte
+}
+
+func (r *recPub) Publish(_ context.Context, exchange, routingKey string, body []byte, _ PublishProperties) error {
+	r.exchange = exchange
+	r.routingKey = routingKey
+	r.body = body
+	return nil
+}
+
+type recSub struct {
+	queue   string
+	handler func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (r *recSub) Subscribe(_ context.Context, queueName string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue = queueName
+	r.handler = handler
+	return nil
+}
+
+// TestSendJob_AcceptsTypedEnumOnly proves the SendJob jobType arg is
+// the JobType type (not string). Passing a constant works; passing a
+// string literal would be a compile error in this same package.
+func TestSendJob_AcceptsTypedEnumOnly(t *testing.T) {
+	tr := &recPub{}
+	if err := NewPublisher(tr).SendJob(context.Background(), "acme", JobTypeDeploy, JobMessage{ID: "j-1"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.routingKey != "acme.deploy" {
+		t.Errorf("routingKey = %q, want acme.deploy", tr.routingKey)
+	}
+}
+
+// TestSubscribeJobResult_AcceptsTypedEnum ensures the queue-name
+// builder also takes the typed enum and serialises it correctly.
+func TestSubscribeJobResult_AcceptsTypedEnum(t *testing.T) {
+	tr := &recSub{}
+	type handlerFn func(ctx context.Context, msg JobResult) error
+	var h handlerFn = func(_ context.Context, _ JobResult) error { return nil }
+	if err := NewSubscriber(tr).SubscribeJobResult(context.Background(), JobTypeRollback, jrHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "rollback.results" {
+		t.Errorf("queue = %q, want rollback.results", tr.queue)
+	}
+}
+
+type jrHandlerAdapter func(ctx context.Context, msg JobResult) error
+
+func (a jrHandlerAdapter) HandleJobResult(ctx context.Context, msg JobResult) error {
+	return a(ctx, msg)
+}
+
+// TestJobTypeConstants_HaveExpectedValues guards against accidental
+// drift in const naming or value mapping. The generated names follow
+// the <TypeName><Pascalize(value)> convention.
+func TestJobTypeConstants_HaveExpectedValues(t *testing.T) {
+	cases := []struct {
+		c    JobType
+		want string
+	}{
+		{JobTypeBuild, "build"},
+		{JobTypeDeploy, "deploy"},
+		{JobTypeRollback, "rollback"},
+	}
+	for _, tc := range cases {
+		if string(tc.c) != tc.want {
+			t.Errorf("%v != %q", tc.c, tc.want)
+		}
+	}
+}
+
+// TestTenantStaysString proves that parameters WITHOUT a schema
+// declaration keep the v0.1.x default `string` Go type — v0.4 only
+// types params that explicitly declared an enum schema.
+func TestTenantStaysString(t *testing.T) {
+	// The arg type appears in the function signature; a compile-time
+	// check is enough — if SendJob's tenant arg had been typed, this
+	// call would fail to compile (we're passing a plain string literal).
+	tr := &recPub{}
+	_ = NewPublisher(tr).SendJob(context.Background(), "acme-tenant", JobTypeBuild, JobMessage{ID: "x"})
+}

@@ -1,0 +1,82 @@
+asyncapi: 3.1.0
+info:
+  title: EnumParams — v0.4 typed channel parameters
+  version: 1.0.0
+  description: |
+    Synthetic fixture for v0.4. Channel parameters with `schema.type:
+    string` and an `enum` list lower to typed Go enum types — the
+    generated Publisher / Subscriber methods take the enum type instead
+    of `string`, so callers can't pass an unrecognised value.
+
+defaultContentType: application/json
+
+channels:
+  jobDispatch:
+    address: '{tenant}.{jobType}'
+    parameters:
+      tenant:
+        # No schema → stays as `string` (v0.4 only types enum params).
+        description: Tenant identifier.
+      jobType:
+        description: Job type (closed enum, drives queue routing).
+        schema:
+          type: string
+          enum: [build, deploy, rollback]
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: JobsExchange
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      JobMessage:
+        name: JobMessage
+        contentType: application/json
+        payload:
+          type: object
+          required: [id]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+
+  jobResultQueue:
+    # Receive op against the same jobType enum — proves the enum type
+    # gets reused (dedup) and that subscriber signatures also pick it up.
+    address: '{jobType}.results'
+    parameters:
+      jobType:
+        description: Job type — same enum as jobDispatch.
+        schema:
+          type: string
+          enum: [build, deploy, rollback]
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: '{jobType}.results'
+          durable: true
+        bindingVersion: 0.3.0
+    messages:
+      JobResult:
+        name: JobResult
+        contentType: application/json
+        payload:
+          type: object
+          required: [id, ok]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+            ok: { type: boolean }
+
+operations:
+  sendJob:
+    action: send
+    channel: { $ref: '#/channels/jobDispatch' }
+    messages:
+      - $ref: '#/channels/jobDispatch/messages/JobMessage'
+  consumeJobResult:
+    action: receive
+    channel: { $ref: '#/channels/jobResultQueue' }
+    messages:
+      - $ref: '#/channels/jobResultQueue/messages/JobResult'
