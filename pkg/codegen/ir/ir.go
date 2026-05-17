@@ -23,6 +23,13 @@ type Spec struct {
 	// by the lowerer from channels.X.parameters.Y.schema when type
 	// is string and an `enum: [...]` list is declared. v0.4+.
 	ParameterEnums []*ParameterEnum
+	// ParameterPatterns collects every distinct pattern-validated
+	// parameter the templates need to render as a typed-wrapper +
+	// New<T>/Must<T> constructor pair. Populated by the lowerer from
+	// channels.X.parameters.Y.schema when type is string and a
+	// `pattern` is declared (and the parameter doesn't already have an
+	// enum — enum wins the closed-set check). v0.4.1+.
+	ParameterPatterns []*ParameterPattern
 }
 
 // ParameterEnum captures one typed-enum channel parameter — what the
@@ -37,6 +44,25 @@ type ParameterEnum struct {
 	// Values is the ordered list of valid string values; the const
 	// names are `<GoTypeName><Pascalize(value)>`, e.g. JobTypeBuild.
 	Values []string
+}
+
+// ParameterPattern captures one pattern-validated channel parameter —
+// what the publisher / subscriber template needs to emit a typed
+// wrapper (`type X string`) plus New<T>/Must<T> constructors that
+// regex-check the input before returning. Dedup + collision rules
+// mirror ParameterEnum: same GoTypeName must declare the same Pattern.
+// Suppressed (parameter falls back to plain string) when the spec sets
+// `x-aapi-codegen.omit-validation: true`.
+type ParameterPattern struct {
+	// GoTypeName is the exported Go type name (derived from the
+	// parameter key, pascalized: dataPartitionID → DataPartitionID).
+	GoTypeName string
+	// Pattern is the spec-declared regex, in the syntax the Go stdlib
+	// `regexp` package accepts (RE2). Spec authors who use
+	// non-RE2 features (lookaround, backreferences) get a clear
+	// `regexp.MustCompile` failure at generated-package load time —
+	// catchable in the unit test that imports the package.
+	Pattern string
 }
 
 // Action is the AsyncAPI operation.action value. Determines which

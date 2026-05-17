@@ -1,0 +1,123 @@
+// Runtime assertions for v0.4.1 pattern-validated parameters.
+
+package validatedparamsv1
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+type recPub struct {
+	exchange, routingKey string
+}
+
+func (r *recPub) Publish(_ context.Context, exchange, routingKey string, _ []byte, _ PublishProperties) error {
+	r.exchange = exchange
+	r.routingKey = routingKey
+	return nil
+}
+
+type recSub struct {
+	queue string
+}
+
+func (r *recSub) Subscribe(_ context.Context, queueName string,
+	_ func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue = queueName
+	return nil
+}
+
+// TestNewDataPartitionID_AcceptsValid: a value matching the pattern
+// constructs cleanly.
+func TestNewDataPartitionID_AcceptsValid(t *testing.T) {
+	got, err := NewDataPartitionID("slb-00001")
+	if err != nil {
+		t.Fatalf("NewDataPartitionID(slb-00001): %v", err)
+	}
+	if string(got) != "slb-00001" {
+		t.Errorf("typed value = %q", got)
+	}
+}
+
+// TestNewDataPartitionID_RejectsInvalid: pattern mismatches return a
+// descriptive error that names the type and the bad input.
+func TestNewDataPartitionID_RejectsInvalid(t *testing.T) {
+	cases := []string{"sib-00001", "slb-0001", "slb-000001", "", "SLB-00001"}
+	for _, tc := range cases {
+		_, err := NewDataPartitionID(tc)
+		if err == nil {
+			t.Errorf("NewDataPartitionID(%q) should fail", tc)
+			continue
+		}
+		if !strings.Contains(err.Error(), "DataPartitionID") || !strings.Contains(err.Error(), tc) {
+			t.Errorf("NewDataPartitionID(%q) error %q should mention type + input", tc, err.Error())
+		}
+	}
+}
+
+// TestMustDataPartitionID_PanicsOnInvalid: Must variant panics with
+// the same error message NewX would have returned.
+func TestMustDataPartitionID_PanicsOnInvalid(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("MustDataPartitionID should panic on bad input")
+		}
+		err, ok := r.(error)
+		if !ok {
+			t.Fatalf("panic value should be error, got %T (%v)", r, r)
+		}
+		if !errors.Is(err, err) || !strings.Contains(err.Error(), "DataPartitionID") {
+			t.Errorf("panic message should reference DataPartitionID: %v", err)
+		}
+	}()
+	_ = MustDataPartitionID("nope")
+}
+
+// TestMustDataPartitionID_HappyPath: valid input returns the typed value.
+func TestMustDataPartitionID_HappyPath(t *testing.T) {
+	got := MustDataPartitionID("slb-00042")
+	if string(got) != "slb-00042" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestSendPartition_FlowsTypedValue: the typed wrapper flows through
+// the publisher signature → routing key unchanged.
+func TestSendPartition_FlowsTypedValue(t *testing.T) {
+	tr := &recPub{}
+	if err := NewPublisher(tr).SendPartition(context.Background(),
+		MustDataPartitionID("slb-00001"),
+		"flow-assurance-1",
+		PartitionMessage{ID: "p-1"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.routingKey != "slb-00001.flow-assurance-1" {
+		t.Errorf("routingKey = %q, want slb-00001.flow-assurance-1", tr.routingKey)
+	}
+}
+
+// TestSubscribeResult_DedupesType: the SAME DataPartitionID type is
+// used by the receive op (proves the lowerer dedup works) — and the
+// queue-name builder wraps it with string() for `+` concatenation.
+func TestSubscribeResult_DedupesType(t *testing.T) {
+	tr := &recSub{}
+	type fn func(ctx context.Context, msg ResultMessage) error
+	var h fn = func(_ context.Context, _ ResultMessage) error { return nil }
+	if err := NewSubscriber(tr).SubscribeResultMessage(context.Background(),
+		MustDataPartitionID("slb-99999"),
+		resultHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "slb-99999.results" {
+		t.Errorf("queue = %q, want slb-99999.results", tr.queue)
+	}
+}
+
+type resultHandlerAdapter func(ctx context.Context, msg ResultMessage) error
+
+func (a resultHandlerAdapter) HandleResultMessage(ctx context.Context, msg ResultMessage) error {
+	return a(ctx, msg)
+}

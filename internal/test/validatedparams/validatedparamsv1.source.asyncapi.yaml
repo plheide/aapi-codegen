@@ -1,0 +1,80 @@
+asyncapi: 3.1.0
+info:
+  title: ValidatedParams — v0.4.1 pattern-validated parameters
+  version: 1.0.0
+  description: |
+    Synthetic fixture for v0.4.1. Parameters with `schema.pattern`
+    lower to typed wrappers with NewX (returning, error on mismatch)
+    and MustX (panic) constructors that regex-check the input.
+
+defaultContentType: application/json
+
+channels:
+  partitionDispatch:
+    address: '{dataPartitionID}.{workflowName}'
+    parameters:
+      dataPartitionID:
+        description: SLB data partition ID (regex-validated).
+        schema:
+          type: string
+          pattern: '^slb-\d{5}$'
+      workflowName:
+        # No pattern → stays as plain `string`.
+        description: Free-form workflow identifier.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: PartitionExchange
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      PartitionMessage:
+        name: PartitionMessage
+        contentType: application/json
+        payload:
+          type: object
+          required: [id]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+
+  resultQueue:
+    # Receive op with the SAME dataPartitionID pattern parameter —
+    # proves the wrapper type dedupes across publisher + subscriber.
+    address: '{dataPartitionID}.results'
+    parameters:
+      dataPartitionID:
+        description: SLB data partition ID — same shape as above.
+        schema:
+          type: string
+          pattern: '^slb-\d{5}$'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: '{dataPartitionID}.results'
+          durable: true
+        bindingVersion: 0.3.0
+    messages:
+      ResultMessage:
+        name: ResultMessage
+        contentType: application/json
+        payload:
+          type: object
+          required: [id]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+
+operations:
+  sendPartition:
+    action: send
+    channel: { $ref: '#/channels/partitionDispatch' }
+    messages:
+      - $ref: '#/channels/partitionDispatch/messages/PartitionMessage'
+  consumeResult:
+    action: receive
+    channel: { $ref: '#/channels/resultQueue' }
+    messages:
+      - $ref: '#/channels/resultQueue/messages/ResultMessage'
