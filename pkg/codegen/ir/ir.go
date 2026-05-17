@@ -58,6 +58,34 @@ type Operation struct {
 	Channel *Channel
 	// Message is the resolved payload type.
 	Message *Message
+	// PublishDefaults carries AMQP message + operation binding values
+	// the publisher template wires into the default PublishProperties.
+	// Nil when the operation has no relevant bindings; the generated
+	// Send method still accepts SendOption opts but starts from a
+	// zero-value PublishProperties. v0.3+.
+	PublishDefaults *PublishDefaults
+}
+
+// PublishDefaults holds the AMQP message-level + operation-level binding
+// fields the publisher template materialises as default
+// PublishProperties values. Each field is a pointer so the template can
+// distinguish "spec didn't declare this" (nil → don't emit a default)
+// from "spec declared zero" (non-nil → emit zero).
+type PublishDefaults struct {
+	// ContentType from defaultContentType or messages.X.contentType.
+	// Always set when at least one of the spec sources declares it.
+	ContentType string
+	// ContentEncoding from messages.X.bindings.amqp.contentEncoding.
+	ContentEncoding string
+	// MessageType from messages.X.bindings.amqp.messageType.
+	MessageType string
+	// Priority from operations.X.bindings.amqp.priority (0-9 in AMQP).
+	Priority *uint8
+	// Expiration from operations.X.bindings.amqp.expiration. Per the
+	// AMQP wire format this is a string-encoded number of milliseconds;
+	// the IR keeps it as a string to preserve the spec author's exact
+	// declaration.
+	Expiration string
 }
 
 // Channel is the AsyncAPI channel an operation publishes to.

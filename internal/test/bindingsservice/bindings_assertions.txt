@@ -1,0 +1,108 @@
+// Runtime assertions for v0.3 SendOption + spec-declared AMQP bindings.
+// Drops into the tmp module produced by bindings_test.go.
+
+package bindingsv1
+
+import (
+	"context"
+	"testing"
+)
+
+type captureTransport struct {
+	exchange   string
+	routingKey string
+	body       []byte
+	props      PublishProperties
+}
+
+func (c *captureTransport) Publish(_ context.Context, exchange, routingKey string, body []byte, props PublishProperties) error {
+	c.exchange = exchange
+	c.routingKey = routingKey
+	c.body = body
+	c.props = props
+	return nil
+}
+
+// TestSendJob_AppliesSpecDefaults: no opts → the generated default
+// PublishProperties (from messages/operations bindings) reaches the
+// transport.
+func TestSendJob_AppliesSpecDefaults(t *testing.T) {
+	tr := &captureTransport{}
+	if err := NewPublisher(tr).SendJob(context.Background(), "acme", JobMessage{ID: "j-1"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.props.ContentType != "application/json" {
+		t.Errorf("ContentType = %q, want application/json", tr.props.ContentType)
+	}
+	if tr.props.ContentEncoding != "utf-8" {
+		t.Errorf("ContentEncoding = %q, want utf-8", tr.props.ContentEncoding)
+	}
+	if tr.props.MessageType != "jobs.dispatch.v1" {
+		t.Errorf("MessageType = %q, want jobs.dispatch.v1", tr.props.MessageType)
+	}
+	if tr.props.Priority == nil || *tr.props.Priority != 5 {
+		t.Errorf("Priority = %v, want *5", tr.props.Priority)
+	}
+	if tr.props.Expiration != "60000" {
+		t.Errorf("Expiration = %q, want 60000", tr.props.Expiration)
+	}
+}
+
+// TestSendJob_OptsOverrideDefaults: per-call SendOptions take precedence
+// over the spec-declared defaults.
+func TestSendJob_OptsOverrideDefaults(t *testing.T) {
+	tr := &captureTransport{}
+	if err := NewPublisher(tr).SendJob(context.Background(), "acme", JobMessage{ID: "j-2"},
+		WithPriority(9),
+		WithExpirationMillis(1000),
+		WithMessageType("jobs.urgent.v1"),
+	); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.props.Priority == nil || *tr.props.Priority != 9 {
+		t.Errorf("Priority = %v, want *9 (override)", tr.props.Priority)
+	}
+	if tr.props.Expiration != "1000" {
+		t.Errorf("Expiration = %q, want 1000 (override)", tr.props.Expiration)
+	}
+	if tr.props.MessageType != "jobs.urgent.v1" {
+		t.Errorf("MessageType = %q, want jobs.urgent.v1 (override)", tr.props.MessageType)
+	}
+	// Defaults the call didn't override stay put.
+	if tr.props.ContentEncoding != "utf-8" {
+		t.Errorf("ContentEncoding = %q, want utf-8 (untouched default)", tr.props.ContentEncoding)
+	}
+}
+
+// TestSendNotify_ZeroDefault: an op with no bindings still gets the
+// defaultContentType, but every other field stays zero.
+func TestSendNotify_ZeroDefault(t *testing.T) {
+	tr := &captureTransport{}
+	if err := NewPublisher(tr).SendNotify(context.Background(), Notify{Text: "hi"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.props.ContentType != "application/json" {
+		t.Errorf("ContentType = %q, want application/json (defaultContentType)", tr.props.ContentType)
+	}
+	if tr.props.MessageType != "" || tr.props.ContentEncoding != "" || tr.props.Expiration != "" {
+		t.Errorf("non-zero defaults leaked: %+v", tr.props)
+	}
+	if tr.props.Priority != nil {
+		t.Errorf("Priority should be nil, got %v", tr.props.Priority)
+	}
+}
+
+// TestSendNotify_OptsStillWork: an op with no spec bindings still
+// accepts opts at runtime — proves the SendOption path is independent
+// of whether the spec carried defaults.
+func TestSendNotify_OptsStillWork(t *testing.T) {
+	tr := &captureTransport{}
+	if err := NewPublisher(tr).SendNotify(context.Background(), Notify{Text: "hi"},
+		WithContentType("application/cloudevents+json"),
+	); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if tr.props.ContentType != "application/cloudevents+json" {
+		t.Errorf("ContentType = %q, want application/cloudevents+json (opt override)", tr.props.ContentType)
+	}
+}
