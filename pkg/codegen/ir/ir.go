@@ -20,14 +20,40 @@ type Spec struct {
 	Operations []*Operation
 }
 
-// Operation is one publishable operation. Maps 1:1 to AsyncAPI
-// `operations.X` with `action: send`.
+// Action is the AsyncAPI operation.action value. Determines which
+// template emits the operation: send → publisher, receive → subscriber.
+type Action string
+
+const (
+	// ActionSend marks a publish operation. The publisher template emits
+	// a Send<MessageName> method.
+	ActionSend Action = "send"
+	// ActionReceive marks a consume operation. The subscriber template
+	// emits a <MessageName>Handler interface and a Subscribe<MessageName>
+	// method (v0.2+).
+	ActionReceive Action = "receive"
+)
+
+// Operation is one published or consumed operation. Maps 1:1 to
+// AsyncAPI `operations.X`. Action distinguishes publisher vs subscriber
+// emission; everything else is shared.
 type Operation struct {
-	// Name is the AsyncAPI operation key, e.g. "sendWidgetMessage".
+	// Name is the AsyncAPI operation key, e.g. "sendWidgetMessage" or
+	// "consumeWidgetMessage".
 	Name string
-	// GoFuncName is the exported Go method name on Publisher, e.g.
-	// "SendWidgetMessage".
+	// Action is the operation's AsyncAPI action (send or receive).
+	Action Action
+	// GoFuncName is the exported Go method name. For send: "SendWidgetMessage"
+	// (on Publisher). For receive: "SubscribeWidgetMessage" (on Subscriber).
 	GoFuncName string
+	// HandlerTypeName is the interface name the subscriber generates and
+	// the consumer code implements. Only set for ActionReceive; empty for
+	// ActionSend. Form: <MessageName>Handler, e.g. "WidgetMessageHandler".
+	HandlerTypeName string
+	// HandlerMethodName is the single method on HandlerTypeName the
+	// consumer implements. Only set for ActionReceive. Form:
+	// Handle<MessageName>, e.g. "HandleWidgetMessage".
+	HandlerMethodName string
 	// Channel is the resolved channel this operation targets.
 	Channel *Channel
 	// Message is the resolved payload type.

@@ -82,18 +82,19 @@ type publisherBindingView struct {
 	AMQP *ir.AMQPBinding
 }
 
-// RenderPublisher emits the publisher Go source. Returns "" when the
-// spec has no send operations — caller should skip emission entirely
-// and not pull in context/json/fmt imports.
+// RenderPublisher emits the publisher Go source for every `action: send`
+// operation in spec. Returns "" when the spec has no send operations —
+// caller should skip emission entirely and not pull in
+// context/json/fmt imports.
 func RenderPublisher(spec *ir.Spec) (string, error) {
-	if len(spec.Operations) == 0 {
-		return "", nil
-	}
 	view := publisherView{DocTitle: spec.DocTitle}
 	for _, op := range spec.Operations {
+		if op.Action != ir.ActionSend {
+			continue
+		}
 		amqp, ok := op.Channel.Binding.(*ir.AMQPBinding)
 		if !ok {
-			return "", fmt.Errorf("operation %q: v1 only supports AMQP bindings, got %q", op.Name, op.Channel.Binding.Kind())
+			return "", fmt.Errorf("operation %q: only AMQP bindings are supported, got %q", op.Name, op.Channel.Binding.Kind())
 		}
 		view.Operations = append(view.Operations, publisherOpView{
 			Name:       op.Name,
@@ -105,6 +106,9 @@ func RenderPublisher(spec *ir.Spec) (string, error) {
 			},
 			Message: op.Message,
 		})
+	}
+	if len(view.Operations) == 0 {
+		return "", nil
 	}
 	tmpl, err := template.New("publisher").Parse(publisherTemplate)
 	if err != nil {

@@ -17,10 +17,10 @@ import (
 	"github.com/plheide/aapi-codegen/pkg/codegen/schema"
 )
 
-// Lower produces the IR spec for one AsyncAPI document. Only operations
-// with `action: send` surface in v1 — `receive` is M3+. Operation
-// iteration order is alphabetical by operation key for deterministic
-// output (Go map iteration is randomised).
+// Lower produces the IR spec for one AsyncAPI document. v0.2 lowers
+// both `action: send` (publisher) and `action: receive` (subscriber)
+// operations. Operation iteration order is alphabetical by operation
+// key for deterministic output (Go map iteration is randomised).
 func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 	spec := &ir.Spec{
 		PackageName: packageName,
@@ -28,8 +28,8 @@ func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 	}
 	for _, opName := range sortedKeys(doc.Operations) {
 		op := doc.Operations[opName]
-		if op.Action != "send" {
-			continue
+		if op.Action != "send" && op.Action != "receive" {
+			return nil, fmt.Errorf("operation %q: unsupported action %q (expected \"send\" or \"receive\")", opName, op.Action)
 		}
 		lowered, err := lowerOperation(doc, opName, op)
 		if err != nil {
@@ -54,7 +54,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (
 		return nil, fmt.Errorf("channel %q: %w", chName, err)
 	}
 	if len(op.Messages) != 1 {
-		return nil, fmt.Errorf("v1 supports exactly 1 message per operation, got %d", len(op.Messages))
+		return nil, fmt.Errorf("v0.2 supports exactly 1 message per operation, got %d", len(op.Messages))
 	}
 	msgName, err := refLastSegment(op.Messages[0].Ref, "#/channels/"+chName+"/messages/")
 	if err != nil {
@@ -68,12 +68,45 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (
 	if err != nil {
 		return nil, fmt.Errorf("message %q: %w", msgName, err)
 	}
-	return &ir.Operation{
-		Name:       opName,
-		GoFuncName: pascalize(opName),
-		Channel:    ch,
-		Message:    msg,
-	}, nil
+	out := &ir.Operation{
+		Name:    opName,
+		Action:  ir.Action(op.Action),
+		Channel: ch,
+		Message: msg,
+	}
+	if op.Action == "send" {
+		// Publisher convention: GoFuncName = pascalize(opName). Operation
+		// keys like "sendWidgetMessage" already encode the verb; mapping
+		// them to "SendWidgetMessage" is a single capitalisation.
+		out.GoFuncName = pascalize(opName)
+	} else {
+		// Subscriber convention: GoFuncName = "Subscribe" + <MessageName>.
+		// Decouples the method name from the spec's operation key (which
+		// might be "consumeJobMessage", "onJobMessage", etc. — whatever
+		// the spec author chose) so consumers always discover
+		// SubscribeJobMessage by message name. Handler interface +
+		// method follow the same message-name-centric convention.
+		out.GoFuncName = "Subscribe" + msg.GoTypeName
+		out.HandlerTypeName = msg.GoTypeName + "Handler"
+		out.HandlerMethodName = "Handle" + msg.GoTypeName
+		// Receive operations require a queue (we need a queue name to
+		// subscribe to). bindings.amqp.is must be "queue" (the address
+		// IS the queue name) OR bindings.amqp.queue.name must be set.
+		amqp, ok := ch.Binding.(*ir.AMQPBinding)
+		if !ok {
+			return nil, fmt.Errorf("receive op %q: only AMQP binding is supported in v0.2", opName)
+		}
+		if amqp.Queue == nil && amqp.ChannelKind != "queue" {
+			return nil, fmt.Errorf("receive op %q: channel %q has no queue topology — set `bindings.amqp.is: queue` (address becomes the queue name) or declare `bindings.amqp.queue.name`", opName, chName)
+		}
+		// When ChannelKind is "queue" but `bindings.amqp.queue` block is
+		// absent, synthesise a Queue with the address as the name so the
+		// templates have a single field to read from.
+		if amqp.Queue == nil {
+			amqp.Queue = &ir.AMQPQueue{Name: ch.Address.Raw}
+		}
+	}
+	return out, nil
 }
 
 func lowerChannel(name string, raw *loader.Channel) (*ir.Channel, error) {
@@ -97,42 +130,53 @@ func lowerChannel(name string, raw *loader.Channel) (*ir.Channel, error) {
 // in the original map but not surfaced) so future AMQP fields don't
 // break the loader.
 //
-// Three failure modes get distinct errors so the spec author sees a
-// pointer at the actual problem in their YAML rather than a generic
-// "binding is malformed":
-//   - bindings block missing entirely (channel has no `bindings:` key)
-//   - bindings present but no `amqp` entry (only other bindings declared)
-//   - `bindings.amqp` present but not an object (wrong YAML shape)
+// Validation differs by channel mode (bindings.amqp.is):
+//   - "queue" (consumer): exchange optional (queues exist independently);
+//     queue block synthesised from address if not declared.
+//   - "routingKey" or unset (publisher): exchange.name + exchange.type
+//     required — that's where messages get published.
 func lowerAMQPBinding(bindings map[string]any) (*ir.AMQPBinding, error) {
 	if bindings == nil {
-		return nil, fmt.Errorf("channel has no `bindings` block; v1 requires `bindings.amqp` (declare `bindings: { amqp: { exchange: {...} } }` on the channel)")
+		return nil, fmt.Errorf("channel has no `bindings` block; aapi-codegen requires `bindings.amqp`")
 	}
 	amqpRaw, hasAMQP := bindings["amqp"]
 	if !hasAMQP {
-		return nil, fmt.Errorf("channel has `bindings` but no `amqp` entry; v1 supports only the AMQP binding")
+		return nil, fmt.Errorf("channel has `bindings` but no `amqp` entry; aapi-codegen supports only the AMQP binding")
 	}
 	raw, ok := amqpRaw.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("`bindings.amqp` is not an object (got %T)", amqpRaw)
 	}
-	exchange, ok := raw["exchange"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("`bindings.amqp.exchange` missing or not an object")
+	channelKind, _ := raw["is"].(string)
+
+	out := &ir.AMQPBinding{ChannelKind: channelKind}
+	out.BindingVersion, _ = raw["bindingVersion"].(string)
+
+	if exchange, ok := raw["exchange"].(map[string]any); ok {
+		out.Exchange, _ = exchange["name"].(string)
+		out.ExchangeType, _ = exchange["type"].(string)
 	}
-	name, _ := exchange["name"].(string)
-	if name == "" {
-		return nil, fmt.Errorf("`bindings.amqp.exchange.name` missing or empty")
+	if queue, ok := raw["queue"].(map[string]any); ok {
+		out.Queue = &ir.AMQPQueue{}
+		out.Queue.Name, _ = queue["name"].(string)
+		out.Queue.Durable, _ = queue["durable"].(bool)
+		out.Queue.AutoDelete, _ = queue["autoDelete"].(bool)
+		out.Queue.Exclusive, _ = queue["exclusive"].(bool)
 	}
-	xtype, _ := exchange["type"].(string)
-	if xtype == "" {
-		return nil, fmt.Errorf("`bindings.amqp.exchange.type` missing or empty")
+
+	// Publisher-mode validation: exchange.name + .type required because
+	// the publisher template uses them as positional arguments to
+	// transport.Publish. Consumer-mode (queue) channels publish nothing
+	// and may legitimately omit exchange details.
+	if channelKind != "queue" {
+		if out.Exchange == "" {
+			return nil, fmt.Errorf("`bindings.amqp.exchange.name` missing or empty (required for publisher channels)")
+		}
+		if out.ExchangeType == "" {
+			return nil, fmt.Errorf("`bindings.amqp.exchange.type` missing or empty (required for publisher channels)")
+		}
 	}
-	version, _ := raw["bindingVersion"].(string)
-	return &ir.AMQPBinding{
-		Exchange:       name,
-		ExchangeType:   xtype,
-		BindingVersion: version,
-	}, nil
+	return out, nil
 }
 
 // lowerMessage resolves the message's payload $ref to a schema file and

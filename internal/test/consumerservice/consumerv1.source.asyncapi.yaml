@@ -1,0 +1,110 @@
+asyncapi: 3.1.0
+info:
+  title: ConsumerService — receive operations
+  version: 1.0.0
+  description: |
+    Synthetic AsyncAPI fixture for v0.2 — `action: receive` codegen.
+    Exercises:
+      - A receive operation on a queue-mode channel (bindings.amqp.is:
+        queue) where the channel address IS the queue name. Address has
+        one parameter (per-tenant queue), so the generated
+        Subscribe<MessageName> signature takes that parameter.
+      - A receive operation on a queue-mode channel with a static
+        address (no parameters) — proves the queue-name interpolation
+        works for both cases.
+      - A spec with BOTH a send and a receive operation, to confirm
+        publisher + subscriber emission can coexist in one package.
+
+defaultContentType: application/json
+
+channels:
+  # Per-tenant queue: address IS the queue name (queue mode), templated
+  # by tenant. Consumers declare one Subscribe per tenant.
+  tenantWorkQueue:
+    address: '{tenant}.work'
+    parameters:
+      tenant: { description: Tenant identifier. }
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: '{tenant}.work'
+          durable: true
+          autoDelete: false
+          exclusive: false
+        bindingVersion: 0.3.0
+    messages:
+      WorkItem:
+        name: WorkItem
+        contentType: application/json
+        payload:
+          type: object
+          required: [id, kind]
+          additionalProperties: false
+          properties:
+            id:   { type: string }
+            kind: { type: string, enum: [build, deploy] }
+
+  # Fixed-name queue: no parameters. Subscribe takes only (ctx, handler).
+  deadLetterQueue:
+    address: dlq.consumer-service
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: dlq.consumer-service
+          durable: true
+        bindingVersion: 0.3.0
+    messages:
+      DeadLetter:
+        name: DeadLetter
+        contentType: application/json
+        payload:
+          type: object
+          required: [originalRoutingKey, reason]
+          additionalProperties: false
+          properties:
+            originalRoutingKey: { type: string }
+            reason:             { type: string }
+
+  # Publisher channel — coexists with the consumer channels above.
+  # Proves the same generated package can carry both Publisher + Subscriber.
+  reportingDispatch:
+    address: '{tenant}.reports'
+    parameters:
+      tenant: { description: Tenant identifier. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: ConsumerReports
+          type: direct
+        bindingVersion: 0.3.0
+    messages:
+      Report:
+        name: Report
+        contentType: application/json
+        payload:
+          type: object
+          required: [id, summary]
+          additionalProperties: false
+          properties:
+            id:      { type: string }
+            summary: { type: string }
+
+operations:
+  consumeWorkItem:
+    action: receive
+    channel: { $ref: '#/channels/tenantWorkQueue' }
+    messages:
+      - $ref: '#/channels/tenantWorkQueue/messages/WorkItem'
+  consumeDeadLetter:
+    action: receive
+    channel: { $ref: '#/channels/deadLetterQueue' }
+    messages:
+      - $ref: '#/channels/deadLetterQueue/messages/DeadLetter'
+  sendReport:
+    action: send
+    channel: { $ref: '#/channels/reportingDispatch' }
+    messages:
+      - $ref: '#/channels/reportingDispatch/messages/Report'

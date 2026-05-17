@@ -61,6 +61,11 @@ type Config struct {
 	// same type would be a compile error, so wire-compat consumers must
 	// opt out here to define their own.
 	OmitValidation bool
+	// OmitPublishers / OmitSubscribers skip the corresponding generated
+	// section even when the spec has matching `action:` operations.
+	// OR-merged with the spec extension equivalents. v0.2+.
+	OmitPublishers  bool
+	OmitSubscribers bool
 }
 
 // Generate runs the pipeline end-to-end and writes one Go file at
@@ -95,6 +100,12 @@ func Generate(specPath string, cfg Config) (string, error) {
 	// opts out → omit; else validation included.
 	if doc.XAAPICodegen != nil && doc.XAAPICodegen.OmitValidation {
 		cfg.OmitValidation = true
+	}
+	if doc.XAAPICodegen != nil && doc.XAAPICodegen.OmitPublishers {
+		cfg.OmitPublishers = true
+	}
+	if doc.XAAPICodegen != nil && doc.XAAPICodegen.OmitSubscribers {
+		cfg.OmitSubscribers = true
 	}
 
 	// Materialize inline payloads + components.schemas into a temp
@@ -142,9 +153,19 @@ func Generate(specPath string, cfg Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("lower: %w", err)
 	}
-	publisherSection, err := RenderPublisher(spec)
-	if err != nil {
-		return "", fmt.Errorf("render publisher: %w", err)
+	var publisherSection string
+	if !cfg.OmitPublishers {
+		publisherSection, err = RenderPublisher(spec)
+		if err != nil {
+			return "", fmt.Errorf("render publisher: %w", err)
+		}
+	}
+	var subscriberSection string
+	if !cfg.OmitSubscribers {
+		subscriberSection, err = RenderSubscriber(spec)
+		if err != nil {
+			return "", fmt.Errorf("render subscriber: %w", err)
+		}
 	}
 
 	// Phase 3: combine, inject imports, gofmt, write.
@@ -152,8 +173,8 @@ func Generate(specPath string, cfg Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read go-jsonschema output: %w", err)
 	}
-	imports := neededImports(publisherSection)
-	combined, err := combineSections(string(jsonschemaOut), imports, []string{publisherSection}, cfg.Package)
+	imports := neededImports(publisherSection, subscriberSection)
+	combined, err := combineSections(string(jsonschemaOut), imports, []string{publisherSection, subscriberSection}, cfg.Package)
 	if err != nil {
 		return "", err
 	}
@@ -213,13 +234,16 @@ func mergeInitialisms(extra []string) []string {
 }
 
 // neededImports returns the imports the appended sections collectively
-// require. Today only the publisher section pulls in extras; kept as a
-// helper so adding a future section (M7+ inline-payload synthesizer
-// etc.) is a one-line addition.
-func neededImports(publisherSection string) []string {
+// require. Publisher + subscriber both pull in context/encoding/json/fmt;
+// subscriber additionally needs `errors` for the ErrDrop sentinel and
+// errors.Join in the JSON-decode wrapper.
+func neededImports(publisherSection, subscriberSection string) []string {
 	var imports []string
-	if publisherSection != "" {
+	if publisherSection != "" || subscriberSection != "" {
 		imports = append(imports, "context", "encoding/json", "fmt")
+	}
+	if subscriberSection != "" {
+		imports = append(imports, "errors")
 	}
 	return imports
 }

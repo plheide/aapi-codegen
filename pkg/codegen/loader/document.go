@@ -38,6 +38,15 @@ type XExtension struct {
 	// publishers). Either source — spec extension or config — can opt
 	// out; the merge is OR semantics (Generate's mergeOmitValidation).
 	OmitValidation bool `yaml:"omit-validation,omitempty"`
+	// OmitPublishers suppresses the Publisher struct + Send<Msg> methods
+	// even when the spec has `action: send` operations. Use when a spec
+	// is consumer-facing only (the producer lives elsewhere; this spec is
+	// a reference copy). v0.2+.
+	OmitPublishers bool `yaml:"omit-publishers,omitempty"`
+	// OmitSubscribers suppresses the Subscriber struct + Subscribe<Msg>
+	// methods + <Msg>Handler interfaces even when the spec has
+	// `action: receive` operations. Symmetric to OmitPublishers. v0.2+.
+	OmitSubscribers bool `yaml:"omit-subscribers,omitempty"`
 }
 
 // Components is the AsyncAPI 3.x `components` object. Models the
