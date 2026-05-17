@@ -31,7 +31,8 @@ type Document struct {
 // XExtension is the typed shape of the spec-level `x-aapi-codegen`
 // extension. Add fields as new declarations move into the spec.
 type XExtension struct {
-	SchemaPackages []SchemaPackageMapping `yaml:"schema-packages,omitempty"`
+	SchemaPackages  []SchemaPackageMapping  `yaml:"schema-packages,omitempty"`
+	MessagePackages []MessagePackageMapping `yaml:"message-packages,omitempty"`
 	// OmitValidation opts out of generated UnmarshalJSON methods for
 	// this spec. Useful when consumers hand-write their own
 	// UnmarshalJSON (e.g. wire-compat shims for legacy PascalCase
@@ -74,6 +75,33 @@ type SchemaPackageMapping struct {
 	ID      string `yaml:"id"`
 	Package string `yaml:"package"`
 	Alias   string `yaml:"alias"`
+}
+
+// MessagePackageMapping ties a referenced AsyncAPI spec file (consumed
+// via cross-file message $ref) to the Go package the producer's
+// already-generated message types live in. Lets a consumer-view spec
+// say "this message comes from over there" without aapi-codegen having
+// to open the other file: the message-name segment of the $ref becomes
+// the Go type name in the mapped package, and the worker's generated
+// Subscriber takes a handler that operates on the imported type.
+//
+// Mapping is by *file path* (the part of the $ref before `#`),
+// resolved relative to the consuming spec's directory at codegen time
+// — same resolution rule the materializer uses for cross-tree payload
+// $refs. Two file paths that resolve to the same on-disk file collapse
+// to one mapping; conflicting mappings on the same file raise a clear
+// error at lower time. v0.5+.
+type MessagePackageMapping struct {
+	// File is the spec file holding the producer's message
+	// definitions, relative to the consuming spec's directory.
+	File string `yaml:"file"`
+	// Package is the Go import path of the producer's already-generated
+	// package (e.g. "faservices.dev/job-service/lib/clients/async/jobmessage/v1").
+	Package string `yaml:"package"`
+	// Alias is the Go import alias the generated code uses for the
+	// imported package. Mandatory — analogous to SchemaPackageMapping.Alias,
+	// for the same Go import-collision reason (multiple `/v1` paths).
+	Alias string `yaml:"alias"`
 }
 
 type Info struct {

@@ -95,6 +95,14 @@ func (d *Document) Materialize(tmpDir string) error {
 		ch := d.Channels[chName]
 		for _, msgName := range sortedKeys(ch.Messages) {
 			msg := ch.Messages[msgName]
+			// Cross-file message $ref (resolved to an imported Go type
+			// via x-aapi-codegen.message-packages at lower time) has no
+			// payload to materialize — the producer's package supplies
+			// the type. Skip the rest of the materialize loop for these.
+			// v0.5+.
+			if msg.Ref != "" {
+				continue
+			}
 			if msg.Payload.Ref != "" {
 				// `#/components/schemas/X` refs in an already-resolved
 				// Payload.Ref (typical when a components.messages entry

@@ -29,7 +29,18 @@ import (
 // `x-aapi-codegen.omit-validation` spec extension semantics: when the
 // consumer has opted out of generated validation, parameter pattern
 // checks are skipped along with the payload UnmarshalJSON checks.
-func Lower(packageName string, doc *loader.Document, omitValidation bool) (*ir.Spec, error) {
+// MessagePackage is one entry from the resolved
+// `x-aapi-codegen.message-packages` mapping the lowerer consults when
+// it encounters a cross-file message $ref. Mirror of
+// codegen.MessagePackageMapping kept local to the lower package so
+// importers don't need to depend on codegen.
+type MessagePackage struct {
+	File    string // path relative to the consuming spec's directory
+	Package string // Go import path
+	Alias   string // Go import alias
+}
+
+func Lower(packageName string, doc *loader.Document, omitValidation bool, messagePackages []MessagePackage) (*ir.Spec, error) {
 	spec := &ir.Spec{
 		PackageName: packageName,
 		DocTitle:    doc.Info.Title,
@@ -39,7 +50,7 @@ func Lower(packageName string, doc *loader.Document, omitValidation bool) (*ir.S
 		if op.Action != "send" && op.Action != "receive" {
 			return nil, fmt.Errorf("operation %q: unsupported action %q (expected \"send\" or \"receive\")", opName, op.Action)
 		}
-		lowered, err := lowerOperation(doc, opName, op, spec, omitValidation)
+		lowered, err := lowerOperation(doc, opName, op, spec, omitValidation, messagePackages)
 		if err != nil {
 			return nil, fmt.Errorf("operation %q: %w", opName, err)
 		}
@@ -48,7 +59,7 @@ func Lower(packageName string, doc *loader.Document, omitValidation bool) (*ir.S
 	return spec, nil
 }
 
-func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, spec *ir.Spec, omitValidation bool) (*ir.Operation, error) {
+func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, spec *ir.Spec, omitValidation bool, messagePackages []MessagePackage) (*ir.Operation, error) {
 	chName, err := refLastSegment(op.Channel.Ref, "#/channels/")
 	if err != nil {
 		return nil, fmt.Errorf("channel ref: %w", err)
@@ -72,7 +83,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, s
 	if !ok {
 		return nil, fmt.Errorf("message %q not declared on channel %q", msgName, chName)
 	}
-	msg, err := lowerMessage(doc.SourcePath, msgName, rawMsg)
+	msg, err := lowerMessage(doc.SourcePath, msgName, rawMsg, messagePackages)
 	if err != nil {
 		return nil, fmt.Errorf("message %q: %w", msgName, err)
 	}
@@ -441,11 +452,22 @@ func lowerAMQPBinding(bindings map[string]any) (*ir.AMQPBinding, error) {
 	return out, nil
 }
 
-// lowerMessage resolves the message's payload $ref to a schema file and
-// reads the title. The schema title is the Go type name go-jsonschema
-// emits under --struct-name-from-title; matching it exactly is what
-// makes the generated publisher reference a real type.
-func lowerMessage(specPath, name string, raw *loader.Message) (*ir.Message, error) {
+// lowerMessage resolves the message into an *ir.Message.
+//
+// Two paths:
+//   - Cross-file message $ref (v0.5+): raw.Ref is set to something like
+//     `../path/spec.yaml#/channels/X/messages/Y`. The lowerer looks up
+//     the file part in messagePackages and returns an Imported message
+//     — the Go type comes from the mapped producer package; no payload
+//     schema is read from disk.
+//   - Local message: lowerer follows raw.Payload.Ref (already
+//     absolutised by the materializer or pointing at an external file)
+//     and reads the schema title for the Go type name. This is the
+//     v0.1.x+ path.
+func lowerMessage(specPath, name string, raw *loader.Message, messagePackages []MessagePackage) (*ir.Message, error) {
+	if raw.Ref != "" {
+		return lowerImportedMessage(specPath, name, raw.Ref, messagePackages)
+	}
 	if raw.Payload.Ref == "" {
 		return nil, fmt.Errorf("inline payload schemas not yet supported (M3+ scope)")
 	}
@@ -474,6 +496,61 @@ func lowerMessage(specPath, name string, raw *loader.Message) (*ir.Message, erro
 		Name:       name,
 		GoTypeName: s.Title,
 	}, nil
+}
+
+// lowerImportedMessage resolves a cross-file message $ref to an
+// imported Go type via x-aapi-codegen.message-packages. The file path
+// part of the ref is resolved relative to the consuming spec's
+// directory; the message-name segment of the fragment is the Go type
+// name in the mapped package. v0.5+.
+func lowerImportedMessage(specPath, name, ref string, messagePackages []MessagePackage) (*ir.Message, error) {
+	hash := strings.Index(ref, "#")
+	if hash < 0 || hash == len(ref)-1 {
+		return nil, fmt.Errorf("cross-file message $ref %q has no fragment — expected `<path>#/channels/<ch>/messages/<key>`", ref)
+	}
+	pathPart := ref[:hash]
+	fragment := ref[hash+1:]
+	if pathPart == "" {
+		return nil, fmt.Errorf("message $ref %q is same-file but not `#/components/messages/...` — unsupported", ref)
+	}
+	// Last fragment segment is the message key on the producer side;
+	// it doubles as the Go type name (--struct-name-from-title makes
+	// go-jsonschema emit the type with that exact name).
+	segments := strings.Split(fragment, "/")
+	typeName := segments[len(segments)-1]
+	if typeName == "" {
+		return nil, fmt.Errorf("cross-file message $ref %q fragment has no trailing segment", ref)
+	}
+
+	// Resolve the path relative to the consuming spec's directory, the
+	// same rule the materializer uses for cross-tree payload $refs.
+	resolved := pathPart
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(specPath), resolved)
+	}
+	resolvedAbs, err := filepath.Abs(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("resolve message $ref path %q: %w", pathPart, err)
+	}
+
+	for _, mp := range messagePackages {
+		mpPath := mp.File
+		if !filepath.IsAbs(mpPath) {
+			mpPath = filepath.Join(filepath.Dir(specPath), mpPath)
+		}
+		mpAbs, _ := filepath.Abs(mpPath)
+		if mpAbs != resolvedAbs {
+			continue
+		}
+		return &ir.Message{
+			Name:            name,
+			GoTypeName:      typeName,
+			ImportedPackage: mp.Package,
+			ImportedAlias:   mp.Alias,
+		}, nil
+	}
+	return nil, fmt.Errorf("cross-file message $ref %q has no matching `x-aapi-codegen.message-packages` mapping — add an entry with file: %q to import the type from the producer's already-generated Go package",
+		ref, pathPart)
 }
 
 // refLastSegment validates that ref starts with prefix and returns the

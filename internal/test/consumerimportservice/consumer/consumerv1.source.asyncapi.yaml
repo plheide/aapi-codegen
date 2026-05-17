@@ -1,0 +1,52 @@
+asyncapi: 3.1.0
+info:
+  title: ConsumerImportService — consumer-view
+  version: 1.0.0
+  description: |
+    Half of the v0.5 cross-file message-ref fixture. This is a
+    consumer-only worker spec that references the producer's
+    OrderMessage via cross-file $ref. The x-aapi-codegen.message-packages
+    extension maps the producer's spec file to the producer's
+    already-generated Go package; the generated Subscriber's Handler
+    interface takes the IMPORTED OrderMessage type — no payload
+    duplication.
+
+defaultContentType: application/json
+
+x-aapi-codegen:
+  message-packages:
+    - file: '../producer/producerv1.source.asyncapi.yaml'
+      package: aapicodegen_v05_test/producerv1
+      alias: producerv1
+  omit-publishers: true
+
+channels:
+  orderConsumer:
+    address: '{tenant}.orders'
+    parameters:
+      tenant: { description: Tenant identifier. }
+    bindings:
+      amqp:
+        # Consumer-mode channel: address IS the queue name. Receive ops
+        # require queue topology (the subscriber needs a queue name).
+        is: queue
+        queue:
+          name: '{tenant}.orders'
+          durable: true
+          autoDelete: false
+          exclusive: false
+        bindingVersion: 0.3.0
+    messages:
+      OrderMessage:
+        # Cross-file $ref into the producer's spec. The lowerer parses
+        # the trailing /<MessageKey> as the Go type name and uses
+        # x-aapi-codegen.message-packages to resolve the file to the
+        # producer's already-generated Go package.
+        $ref: '../producer/producerv1.source.asyncapi.yaml#/channels/orderDispatch/messages/OrderMessage'
+
+operations:
+  consumeOrder:
+    action: receive
+    channel: { $ref: '#/channels/orderConsumer' }
+    messages:
+      - $ref: '#/channels/orderConsumer/messages/OrderMessage'

@@ -18,9 +18,10 @@ import (
 // values when both are present (the precedence is established by
 // MergeFlags).
 type Configuration struct {
-	Package        string                 `yaml:"package"`
-	Output         string                 `yaml:"output"`
-	SchemaPackages []SchemaPackageMapping `yaml:"schema-packages"`
+	Package         string                  `yaml:"package"`
+	Output          string                  `yaml:"output"`
+	SchemaPackages  []SchemaPackageMapping  `yaml:"schema-packages"`
+	MessagePackages []MessagePackageMapping `yaml:"message-packages"`
 	// Capitalization mirrors go-jsonschema's --capitalization flag list.
 	// When empty, DefaultInitialisms is applied.
 	Capitalization []string `yaml:"capitalization"`
@@ -39,6 +40,18 @@ type Configuration struct {
 // would otherwise collide.
 type SchemaPackageMapping struct {
 	ID      string `yaml:"id"`
+	Package string `yaml:"package"`
+	Alias   string `yaml:"alias"`
+}
+
+// MessagePackageMapping ties a referenced AsyncAPI spec file (consumed
+// via cross-file message $ref) to the Go package the producer's
+// already-generated message types live in. See
+// loader.MessagePackageMapping for the field semantics — this type is
+// the codegen-internal mirror (loader can't import codegen without a
+// cycle; Generate converts at the boundary). v0.5+.
+type MessagePackageMapping struct {
+	File    string `yaml:"file"`
 	Package string `yaml:"package"`
 	Alias   string `yaml:"alias"`
 }
@@ -80,11 +93,12 @@ func (c *Configuration) MergeFlags(pkg, output string, capitalization []string) 
 // schema can evolve independently of the internal struct's fields.
 func (c *Configuration) ToCodegenConfig() Config {
 	return Config{
-		Package:        c.Package,
-		Output:         c.Output,
-		Initialisms:    c.Capitalization,
-		SchemaPackages: c.SchemaPackages,
-		OmitValidation: c.OmitValidation,
+		Package:         c.Package,
+		Output:          c.Output,
+		Initialisms:     c.Capitalization,
+		SchemaPackages:  c.SchemaPackages,
+		MessagePackages: c.MessagePackages,
+		OmitValidation:  c.OmitValidation,
 	}
 }
 

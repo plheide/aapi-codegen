@@ -144,14 +144,42 @@ type Channel struct {
 	Binding Binding
 }
 
-// Message is the resolved payload type the operation publishes.
+// Message is the resolved payload type the operation publishes/consumes.
+//
+// Two flavours, distinguished by ImportedPackage:
+//   - Local: GoTypeName names a type declared in the generated package
+//     (default — the spec defines the payload inline or via a $ref the
+//     lowerer materializes).
+//   - Imported (v0.5+): the message is a cross-file $ref into another
+//     spec's message; the producer's already-generated package supplies
+//     the Go type. ImportedPackage is the producer's Go import path,
+//     ImportedAlias is the local import alias, GoTypeName is the type
+//     name in that package. Generated code references
+//     `<ImportedAlias>.<GoTypeName>`.
 type Message struct {
 	// Name is the AsyncAPI message key, e.g. "WidgetMessage".
 	Name string
 	// GoTypeName is the exported Go struct type the payload generates
 	// to (matches the JSON Schema's `title`, since
-	// --struct-name-from-title is on).
+	// --struct-name-from-title is on, for local messages; the message
+	// name for imported messages).
 	GoTypeName string
+	// ImportedPackage and ImportedAlias are set when the message was
+	// resolved via x-aapi-codegen.message-packages (cross-file $ref).
+	// Empty for local messages. v0.5+.
+	ImportedPackage string
+	ImportedAlias   string
+}
+
+// QualifiedGoType returns the type name as the templates should emit it.
+// For local messages this is just GoTypeName. For imported messages it
+// is the alias.TypeName form. Centralising the rendering here keeps
+// templates from having to branch on the imported-vs-local distinction.
+func (m *Message) QualifiedGoType() string {
+	if m.ImportedAlias != "" {
+		return m.ImportedAlias + "." + m.GoTypeName
+	}
+	return m.GoTypeName
 }
 
 // Address is a parsed channel-address template. Templated parameters

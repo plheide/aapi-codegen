@@ -100,6 +100,12 @@ func (d *Document) PayloadSchemaPaths() ([]string, error) {
 	var out []string
 	for chanName, ch := range d.Channels {
 		for msgName, msg := range ch.Messages {
+			// Cross-file message $ref → imported Go type (v0.5+). No
+			// payload schema to feed to go-jsonschema; the producer's
+			// already-generated package supplies the type.
+			if msg.Ref != "" {
+				continue
+			}
 			ref := msg.Payload.Ref
 			if ref == "" {
 				return nil, fmt.Errorf("channel %q message %q: inline payload schemas not yet supported (M1)", chanName, msgName)
@@ -125,8 +131,10 @@ func (d *Document) PayloadSchemaPaths() ([]string, error) {
 			out = append(out, abs)
 		}
 	}
-	if len(out) == 0 {
-		return nil, errors.New("no payload schemas found in spec")
-	}
+	// v0.5+: a pure consumer-import spec (every message resolved via
+	// cross-file $ref) legitimately has no local payload schemas. The
+	// caller (codegen.Generate) handles the empty-schemas case by
+	// skipping the go-jsonschema invocation and emitting only the
+	// publisher/subscriber + parameter sections.
 	return out, nil
 }

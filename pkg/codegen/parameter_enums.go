@@ -30,7 +30,7 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 		return "", nil
 	}
 	var b strings.Builder
-	b.WriteString("\n// ---------- aapi-codegen parameter types (generated, DO NOT EDIT) ----------\n\n")
+	b.WriteString("\n")
 	for _, e := range spec.ParameterEnums {
 		fmt.Fprintf(&b, "// %s is the typed value for the AsyncAPI channel parameter\n", e.GoTypeName)
 		fmt.Fprintf(&b, "// declared with `schema.type: string` and an `enum` list — used as the\n")
