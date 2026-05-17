@@ -1,0 +1,203 @@
+// Drop-in runtime test for the generated consumerv1 package. Exercises
+// the Subscriber + Handler surface end-to-end against a fake transport.
+//
+// The fake transport records each Subscribe call, drives a synthetic
+// delivery into the registered callback, and asserts the resulting
+// ack/nack-vs-handler-error contract:
+//   - nil               → handler called, no transport-level error
+//   - errors.Is(err, ErrDrop)  → handler error returned to transport
+//     (transport's job to map to nack-no-requeue; we just verify the
+//     error joins the sentinel)
+//   - any other err     → handler error returned (transport requeues)
+//
+// Also verifies a JSON-decode failure inside the dispatch wrapper is
+// joined with ErrDrop, so a poison payload doesn't loop forever.
+
+package consumerv1
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"testing"
+)
+
+// fakeSubscribeTransport records what the Subscriber wired up and lets
+// each test drive a synthetic delivery.
+type fakeSubscribeTransport struct {
+	queue   string
+	handler func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (f *fakeSubscribeTransport) Subscribe(_ context.Context, queueName string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	f.queue = queueName
+	f.handler = handler
+	return nil
+}
+
+// trackingHandler records the calls it observes, returning the error
+// supplied per-test (so we can drive ack/nack mapping cases).
+type trackingHandler struct {
+	gotMsg WorkItem
+	called bool
+	ret    error
+}
+
+func (h *trackingHandler) HandleWorkItem(_ context.Context, msg WorkItem) error {
+	h.called = true
+	h.gotMsg = msg
+	return h.ret
+}
+
+// TestSubscribeWorkItem_QueueNameInterpolation proves the templated
+// queue name "{tenant}.work" interpolates the tenant arg correctly.
+func TestSubscribeWorkItem_QueueNameInterpolation(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	sub := NewSubscriber(tr)
+	if err := sub.SubscribeWorkItem(context.Background(), "acme", &trackingHandler{}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "acme.work" {
+		t.Errorf("queue name = %q, want %q", tr.queue, "acme.work")
+	}
+	if tr.handler == nil {
+		t.Fatal("handler not registered with transport")
+	}
+}
+
+// TestSubscribeWorkItem_HappyPath drives a valid message through the
+// generated wrapper and confirms the handler receives the decoded value.
+func TestSubscribeWorkItem_HappyPath(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	h := &trackingHandler{}
+	if err := NewSubscriber(tr).SubscribeWorkItem(context.Background(), "acme", h); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	body, _ := json.Marshal(WorkItem{ID: "id-1", Kind: WorkItemKindBuild})
+	if err := tr.handler(context.Background(), "acme.work", body); err != nil {
+		t.Fatalf("handler dispatch returned error: %v", err)
+	}
+	if !h.called {
+		t.Fatal("handler not invoked")
+	}
+	if h.gotMsg.ID != "id-1" || h.gotMsg.Kind != WorkItemKindBuild {
+		t.Errorf("decoded msg = %+v", h.gotMsg)
+	}
+}
+
+// TestSubscribeWorkItem_HandlerErrDropPassesThrough ensures a handler
+// that returns ErrDrop has that sentinel observable to the transport
+// (which then maps it to nack-no-requeue). The wrapper does NOT swallow
+// the error.
+func TestSubscribeWorkItem_HandlerErrDropPassesThrough(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	h := &trackingHandler{ret: fmt.Errorf("poison: %w", ErrDrop)}
+	_ = NewSubscriber(tr).SubscribeWorkItem(context.Background(), "acme", h)
+	body, _ := json.Marshal(WorkItem{ID: "x", Kind: WorkItemKindDeploy})
+	gotErr := tr.handler(context.Background(), "acme.work", body)
+	if !errors.Is(gotErr, ErrDrop) {
+		t.Errorf("transport-returned error should satisfy errors.Is(_, ErrDrop); got %v", gotErr)
+	}
+}
+
+// TestSubscribeWorkItem_HandlerTransientErrorRetries: a non-ErrDrop
+// error from the handler is passed back unchanged so the transport can
+// requeue (semantics defined by the transport, not the generated code —
+// the contract here is just "the error reaches the transport").
+func TestSubscribeWorkItem_HandlerTransientErrorRetries(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	wantErr := errors.New("network blip")
+	h := &trackingHandler{ret: wantErr}
+	_ = NewSubscriber(tr).SubscribeWorkItem(context.Background(), "acme", h)
+	body, _ := json.Marshal(WorkItem{ID: "y", Kind: WorkItemKindDeploy})
+	gotErr := tr.handler(context.Background(), "acme.work", body)
+	if !errors.Is(gotErr, wantErr) {
+		t.Errorf("handler error should propagate; got %v want %v", gotErr, wantErr)
+	}
+	if errors.Is(gotErr, ErrDrop) {
+		t.Errorf("non-ErrDrop handler error should NOT be wrapped with ErrDrop; got %v", gotErr)
+	}
+}
+
+// TestSubscribeWorkItem_PoisonPayloadDropped: a body that doesn't
+// unmarshal triggers the generated wrapper to return an error joined
+// with ErrDrop, so the transport never requeues the poison.
+func TestSubscribeWorkItem_PoisonPayloadDropped(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	h := &trackingHandler{}
+	_ = NewSubscriber(tr).SubscribeWorkItem(context.Background(), "acme", h)
+	// Malformed JSON; will fail json.Unmarshal in the wrapper.
+	gotErr := tr.handler(context.Background(), "acme.work", []byte("{not json"))
+	if !errors.Is(gotErr, ErrDrop) {
+		t.Errorf("poison-payload error should be ErrDrop; got %v", gotErr)
+	}
+	if h.called {
+		t.Error("handler should NOT be invoked when payload fails to unmarshal")
+	}
+}
+
+// TestSubscribeDeadLetter_StaticQueueName proves the no-parameter
+// channel emits a Subscribe method without the parameter arg and uses
+// the literal queue name.
+func TestSubscribeDeadLetter_StaticQueueName(t *testing.T) {
+	tr := &fakeSubscribeTransport{}
+	var captured DeadLetter
+	called := false
+	type dlHandlerFn func(ctx context.Context, msg DeadLetter) error
+	var h dlHandlerFn = func(_ context.Context, msg DeadLetter) error {
+		captured = msg
+		called = true
+		return nil
+	}
+	if err := NewSubscriber(tr).SubscribeDeadLetter(context.Background(), dlHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "dlq.consumer-service" {
+		t.Errorf("queue = %q, want %q", tr.queue, "dlq.consumer-service")
+	}
+	body, _ := json.Marshal(DeadLetter{OriginalRoutingKey: "rk", Reason: "nope"})
+	if err := tr.handler(context.Background(), "dlq.consumer-service", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !called || captured.Reason != "nope" {
+		t.Errorf("handler not called correctly: called=%v msg=%+v", called, captured)
+	}
+}
+
+// dlHandlerAdapter lets us pass a closure where a DeadLetterHandler is
+// expected without declaring a top-level type per test.
+type dlHandlerAdapter func(ctx context.Context, msg DeadLetter) error
+
+func (a dlHandlerAdapter) HandleDeadLetter(ctx context.Context, msg DeadLetter) error {
+	return a(ctx, msg)
+}
+
+// TestPublisher_StillWorksAlongsideSubscriber: a spec with both send
+// and receive ops must produce a coexisting Publisher + Subscriber in
+// the same package. Smoke-test the Send half.
+func TestPublisher_StillWorksAlongsideSubscriber(t *testing.T) {
+	type call struct {
+		exchange, routingKey string
+		body                 []byte
+	}
+	var got call
+	tr := publishFn(func(_ context.Context, exchange, routingKey string, body []byte) error {
+		got = call{exchange: exchange, routingKey: routingKey, body: body}
+		return nil
+	})
+	if err := NewPublisher(tr).SendReport(context.Background(), "acme",
+		Report{ID: "r-1", Summary: "ok"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if got.exchange != "ConsumerReports" || got.routingKey != "acme.reports" {
+		t.Errorf("Send target = (%q, %q), want (ConsumerReports, acme.reports)", got.exchange, got.routingKey)
+	}
+}
+
+type publishFn func(ctx context.Context, exchange, routingKey string, body []byte) error
+
+func (f publishFn) Publish(ctx context.Context, exchange, routingKey string, body []byte) error {
+	return f(ctx, exchange, routingKey, body)
+}
