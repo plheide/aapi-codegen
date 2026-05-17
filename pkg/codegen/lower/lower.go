@@ -436,6 +436,23 @@ func lowerAMQPBinding(bindings map[string]any) (*ir.AMQPBinding, error) {
 		out.Queue.AutoDelete, _ = queue["autoDelete"].(bool)
 		out.Queue.Exclusive, _ = queue["exclusive"].(bool)
 	}
+	// v0.5.1+: also accept the queue declaration under
+	// `bindings.x-aapi-codegen.queue`. AsyncAPI AMQP 0.3.0 disallows the
+	// `queue` block when `is: routingKey` (the validator rejects it),
+	// so consumers that declare their own queue in routingKey-mode
+	// channels need an escape hatch. The extension namespace IS that
+	// hatch. Standard binding takes precedence when both are present.
+	if out.Queue == nil {
+		if xExt, ok := bindings["x-aapi-codegen"].(map[string]any); ok {
+			if queue, ok := xExt["queue"].(map[string]any); ok {
+				out.Queue = &ir.AMQPQueue{}
+				out.Queue.Name, _ = queue["name"].(string)
+				out.Queue.Durable, _ = queue["durable"].(bool)
+				out.Queue.AutoDelete, _ = queue["autoDelete"].(bool)
+				out.Queue.Exclusive, _ = queue["exclusive"].(bool)
+			}
+		}
+	}
 
 	// Publisher-mode validation: exchange.name + .type required because
 	// the publisher template uses them as positional arguments to
