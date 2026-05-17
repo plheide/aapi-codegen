@@ -101,8 +101,11 @@ func (d *Document) rewriteOpMessageRef(opName string, op *Operation, ref string)
 
 func (d *Document) inlineMessageRef(chName, msgKey string, msg *Message) error {
 	if !strings.HasPrefix(msg.Ref, componentMessageRefPrefix) {
-		return fmt.Errorf("channel %q message %q: unsupported $ref %q (only #/components/messages/<Name> is supported)",
-			chName, msgKey, msg.Ref)
+		// Cross-file refs (e.g. `../path/spec.yaml#/channels/X/messages/Y`)
+		// and any other shape pass through to the lowerer, which
+		// consults x-aapi-codegen.message-packages to resolve them to
+		// an imported Go type. v0.5+.
+		return nil
 	}
 	name := msg.Ref[len(componentMessageRefPrefix):]
 	if d.Components == nil || d.Components.Messages == nil {

@@ -23,8 +23,6 @@ import (
 // with ErrDrop, because a payload that doesn't parse will never parse no
 // matter how many times you requeue it.
 const subscriberTemplate = `
-// ---------- aapi-codegen subscriber (generated, DO NOT EDIT) ----------
-
 // SubscribeTransport is the consumer half of the AMQP surface
 // aapi-codegen-generated subscribers need. It is intentionally separate
 // from the (publisher) Transport so a package that only consumes can
@@ -58,15 +56,15 @@ func NewSubscriber(transport SubscribeTransport) *Subscriber {
 	return &Subscriber{transport: transport}
 }
 {{ range .Operations }}
-// {{.HandlerTypeName}} consumes {{.Message.GoTypeName}} messages.
+// {{.HandlerTypeName}} consumes {{.Message.QualifiedGoType}} messages.
 // Implement on your consumer; the generated Subscribe wrapper takes care
 // of JSON-decoding the body and mapping handler errors to ack semantics
 // per ErrDrop.
 type {{.HandlerTypeName}} interface {
-	{{.HandlerMethodName}}(ctx context.Context, msg {{.Message.GoTypeName}}) error
+	{{.HandlerMethodName}}(ctx context.Context, msg {{.Message.QualifiedGoType}}) error
 }
 
-// {{.GoFuncName}} starts consuming {{.Message.GoTypeName}} messages from
+// {{.GoFuncName}} starts consuming {{.Message.QualifiedGoType}} messages from
 // the queue named "{{.Queue.NameExpr}}" (from bindings.amqp.queue.name).
 // Blocks until ctx is cancelled or a fatal transport error occurs.
 // Generated from operations.{{.Name}} (channel {{.Channel.Name}}).
@@ -79,11 +77,11 @@ func (s *Subscriber) {{.GoFuncName}}(
 ) error {
 	queueName := {{.Queue.NameExprGo}}
 	return s.transport.Subscribe(ctx, queueName, func(ctx context.Context, routingKey string, body []byte) error {
-		var msg {{.Message.GoTypeName}}
+		var msg {{.Message.QualifiedGoType}}
 		if err := json.Unmarshal(body, &msg); err != nil {
 			// A payload that doesn't unmarshal will never unmarshal —
 			// drop it rather than requeue forever.
-			return fmt.Errorf("decode {{.Message.GoTypeName}} (dropping): %w", errors.Join(ErrDrop, err))
+			return fmt.Errorf("decode {{.Message.QualifiedGoType}} (dropping): %w", errors.Join(ErrDrop, err))
 		}
 		return handler.{{.HandlerMethodName}}(ctx, msg)
 	})

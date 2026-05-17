@@ -23,8 +23,6 @@ import (
 // `props PublishProperties` argument. Adapters wrapping
 // *amqp091.Channel grow one line per binding field they translate.
 const publisherTemplate = `
-// ---------- aapi-codegen publisher (generated, DO NOT EDIT) ----------
-
 // PublishProperties carries AMQP message-level metadata the publisher
 // passes through to the broker. Spec authors declare defaults via
 // messages.<X>.bindings.amqp.{contentEncoding, messageType} and
@@ -98,7 +96,7 @@ func NewPublisher(transport Transport) *Publisher {
 	return &Publisher{transport: transport}
 }
 {{ range .Operations }}
-// {{.GoFuncName}} publishes a {{.Message.GoTypeName}} to the {{.Channel.Binding.AMQP.Exchange}}
+// {{.GoFuncName}} publishes a {{.Message.QualifiedGoType}} to the {{.Channel.Binding.AMQP.Exchange}}
 // {{.Channel.Binding.AMQP.ExchangeType}} exchange with routing key "{{.Channel.Address.Raw}}".
 // Generated from operations.{{.Name}} (channel {{.Channel.Name}}).
 func (p *Publisher) {{.GoFuncName}}(
@@ -106,7 +104,7 @@ func (p *Publisher) {{.GoFuncName}}(
 {{- range .Channel.Address.Params }}
 	{{.GoArgName}} {{.GoType}},
 {{- end }}
-	msg {{.Message.GoTypeName}},
+	msg {{.Message.QualifiedGoType}},
 	opts ...SendOption,
 ) error {
 	props := PublishProperties{
@@ -133,7 +131,7 @@ func (p *Publisher) {{.GoFuncName}}(
 	}
 	body, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("marshal {{.Message.GoTypeName}}: %w", err)
+		return fmt.Errorf("marshal {{.Message.QualifiedGoType}}: %w", err)
 	}
 	routingKey := {{.Channel.Address.RoutingKeyExpr}}
 	return p.transport.Publish(ctx, {{printf "%q" .Channel.Binding.AMQP.Exchange}}, routingKey, body, props)

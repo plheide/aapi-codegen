@@ -1,0 +1,64 @@
+// Runtime assertions for v0.5 cross-file message $ref.
+// Drops into the tmp module's consumerv1 package; demonstrates that an
+// OrderMessage produced by the producer's Publisher round-trips
+// through the consumer's Subscriber as the same Go type.
+
+package consumerv1
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	producerv1 "aapicodegen_v05_test/producerv1"
+)
+
+type fakeSub struct {
+	queue   string
+	handler func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (f *fakeSub) Subscribe(_ context.Context, queueName string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	f.queue = queueName
+	f.handler = handler
+	return nil
+}
+
+type capturingHandler struct {
+	got    producerv1.OrderMessage
+	called bool
+}
+
+func (h *capturingHandler) HandleOrderMessage(_ context.Context, m producerv1.OrderMessage) error {
+	h.got = m
+	h.called = true
+	return nil
+}
+
+// TestImportedType_FlowsThroughSubscriber: the imported type is the
+// same Go type the producer's Publisher emits — no per-package
+// OrderMessage copies. Encode via the producer's type, decode via the
+// subscriber wrapper, get the same value out.
+func TestImportedType_FlowsThroughSubscriber(t *testing.T) {
+	tr := &fakeSub{}
+	h := &capturingHandler{}
+	if err := NewSubscriber(tr).SubscribeOrderMessage(context.Background(), "acme", h); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "acme.orders" {
+		t.Errorf("queue = %q, want acme.orders", tr.queue)
+	}
+	qty := 7
+	original := producerv1.OrderMessage{ID: "ord-1", Sku: "WIDGET", Qty: &qty}
+	body, _ := json.Marshal(original)
+	if err := tr.handler(context.Background(), "acme.orders", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !h.called {
+		t.Fatal("handler not invoked")
+	}
+	if h.got.ID != "ord-1" || h.got.Sku != "WIDGET" || h.got.Qty == nil || *h.got.Qty != 7 {
+		t.Errorf("round-trip mismatch: %+v", h.got)
+	}
+}
