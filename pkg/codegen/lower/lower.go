@@ -31,7 +31,7 @@ func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 		if op.Action != "send" && op.Action != "receive" {
 			return nil, fmt.Errorf("operation %q: unsupported action %q (expected \"send\" or \"receive\")", opName, op.Action)
 		}
-		lowered, err := lowerOperation(doc, opName, op)
+		lowered, err := lowerOperation(doc, opName, op, spec)
 		if err != nil {
 			return nil, fmt.Errorf("operation %q: %w", opName, err)
 		}
@@ -40,7 +40,7 @@ func Lower(packageName string, doc *loader.Document) (*ir.Spec, error) {
 	return spec, nil
 }
 
-func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (*ir.Operation, error) {
+func lowerOperation(doc *loader.Document, opName string, op *loader.Operation, spec *ir.Spec) (*ir.Operation, error) {
 	chName, err := refLastSegment(op.Channel.Ref, "#/channels/")
 	if err != nil {
 		return nil, fmt.Errorf("channel ref: %w", err)
@@ -49,7 +49,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (
 	if !ok {
 		return nil, fmt.Errorf("channel %q not declared", chName)
 	}
-	ch, err := lowerChannel(chName, rawCh)
+	ch, err := lowerChannel(chName, rawCh, spec)
 	if err != nil {
 		return nil, fmt.Errorf("channel %q: %w", chName, err)
 	}
@@ -118,7 +118,7 @@ func lowerOperation(doc *loader.Document, opName string, op *loader.Operation) (
 	return out, nil
 }
 
-func lowerChannel(name string, raw *loader.Channel) (*ir.Channel, error) {
+func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec) (*ir.Channel, error) {
 	addr, err := ir.ParseAddress(raw.Address)
 	if err != nil {
 		return nil, err
@@ -127,11 +127,89 @@ func lowerChannel(name string, raw *loader.Channel) (*ir.Channel, error) {
 	if err != nil {
 		return nil, err
 	}
+	// v0.4: walk each address parameter; if the spec declares an enum
+	// schema for it, override the AddressParam's GoType and register
+	// the enum type globally on the spec.
+	for i, p := range addr.Params {
+		paramDef, ok := raw.Parameters[p.JSONName]
+		if !ok || paramDef == nil {
+			continue
+		}
+		enum, ok := parameterEnum(paramDef.Schema)
+		if !ok {
+			continue
+		}
+		typeName := pascalize(p.JSONName)
+		if err := registerParameterEnum(spec, typeName, enum); err != nil {
+			return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
+		}
+		addr.Params[i].GoType = typeName
+	}
 	return &ir.Channel{
 		Name:    name,
 		Address: addr,
 		Binding: binding,
 	}, nil
+}
+
+// parameterEnum returns the string-enum values declared on a parameter
+// schema, or (nil, false) if the schema isn't `{type: string, enum: [...]}`.
+// $ref-based schemas are deliberately not followed — v0.4 only handles
+// inline enums to keep the surface narrow.
+func parameterEnum(schema map[string]any) ([]string, bool) {
+	if schema == nil {
+		return nil, false
+	}
+	if t, _ := schema["type"].(string); t != "string" {
+		return nil, false
+	}
+	rawList, ok := schema["enum"].([]any)
+	if !ok || len(rawList) == 0 {
+		return nil, false
+	}
+	out := make([]string, 0, len(rawList))
+	for _, v := range rawList {
+		s, ok := v.(string)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
+}
+
+// registerParameterEnum adds the enum to spec.ParameterEnums, deduping
+// on GoTypeName. Two parameters that lower to the same type name must
+// declare the same value list; otherwise the spec is contradicting
+// itself and emission would yield two conflicting `type X string`
+// declarations.
+func registerParameterEnum(spec *ir.Spec, typeName string, values []string) error {
+	for _, existing := range spec.ParameterEnums {
+		if existing.GoTypeName != typeName {
+			continue
+		}
+		if !stringSlicesEqual(existing.Values, values) {
+			return fmt.Errorf("enum type %q declared with conflicting values (%v vs %v) — rename one parameter or align the enum values", typeName, existing.Values, values)
+		}
+		return nil
+	}
+	spec.ParameterEnums = append(spec.ParameterEnums, &ir.ParameterEnum{
+		GoTypeName: typeName,
+		Values:     append([]string(nil), values...),
+	})
+	return nil
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // lowerPublishDefaults pulls AMQP message + operation binding values

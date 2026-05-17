@@ -15,9 +15,28 @@ type Spec struct {
 	PackageName string
 	// DocTitle is doc.Info.Title, used in publisher comments.
 	DocTitle string
-	// Operations is the ordered list of operations to emit (only
-	// `action: send` operations in v1; `action: receive` is M3+).
+	// Operations is the ordered list of operations to emit (both
+	// `action: send` and `action: receive` from v0.2).
 	Operations []*Operation
+	// ParameterEnums collects every distinct typed-enum parameter the
+	// templates need to render as a Go enum type + constants. Populated
+	// by the lowerer from channels.X.parameters.Y.schema when type
+	// is string and an `enum: [...]` list is declared. v0.4+.
+	ParameterEnums []*ParameterEnum
+}
+
+// ParameterEnum captures one typed-enum channel parameter — what the
+// publisher / subscriber template needs to emit a Go enum (named type +
+// const block). Two distinct channel parameters that resolve to the
+// same GoTypeName + Values get deduped by the lowerer; collisions on
+// the GoTypeName with mismatching values raise an error.
+type ParameterEnum struct {
+	// GoTypeName is the exported Go type name (derived from the
+	// parameter key, pascalized: jobType → JobType).
+	GoTypeName string
+	// Values is the ordered list of valid string values; the const
+	// names are `<GoTypeName><Pascalize(value)>`, e.g. JobTypeBuild.
+	Values []string
 }
 
 // Action is the AsyncAPI operation.action value. Determines which

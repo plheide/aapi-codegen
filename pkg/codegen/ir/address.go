@@ -85,20 +85,38 @@ func ParseAddress(s string) (Address, error) {
 // string literal ("widget.cancellation"). For templated addresses,
 // returns a `+`-concatenation of arg names and quoted literals (a +
 // "." + b). Single-parameter addresses become just the arg name.
+//
+// Typed parameters (GoType != "string", e.g. a JobType enum from v0.4)
+// are coerced to string via an explicit `string(name)` cast so the `+`
+// concatenation type-checks.
 func (a Address) RoutingKeyExpr() string {
 	if len(a.Parts) == 1 && !a.Parts[0].IsParam() {
 		return fmt.Sprintf("%q", a.Parts[0].Literal)
 	}
 	if len(a.Parts) == 1 && a.Parts[0].IsParam() {
-		return a.Parts[0].Param
+		return a.paramRef(a.Parts[0].Param)
 	}
 	pieces := make([]string, 0, len(a.Parts))
 	for _, p := range a.Parts {
 		if p.IsParam() {
-			pieces = append(pieces, p.Param)
+			pieces = append(pieces, a.paramRef(p.Param))
 		} else {
 			pieces = append(pieces, fmt.Sprintf("%q", p.Literal))
 		}
 	}
 	return strings.Join(pieces, " + ")
+}
+
+// paramRef returns the Go expression referencing the given parameter
+// argument from inside an expression that expects a string. For
+// "string"-typed parameters this is the bare arg name; for typed
+// parameters (e.g. an enum) it wraps with `string(name)` so the `+`
+// concatenation in RoutingKeyExpr type-checks.
+func (a Address) paramRef(name string) string {
+	for _, p := range a.Params {
+		if p.JSONName == name && p.GoType != "string" {
+			return "string(" + p.GoArgName + ")"
+		}
+	}
+	return name
 }

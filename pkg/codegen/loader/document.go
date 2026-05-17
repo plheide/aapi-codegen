@@ -93,7 +93,12 @@ type Channel struct {
 
 type Parameter struct {
 	Description string `yaml:"description,omitempty"`
-	// Schema, enum etc. live here when the spec needs them. M1 doesn't.
+	// Schema is the parameter's typed schema fragment per AsyncAPI 3.x
+	// `channels.X.parameters.Y.schema`. v0.4 reads `type` and `enum`
+	// from here to derive typed Go enum types for the Publisher /
+	// Subscriber signature. Other JSON-Schema fields (pattern, format)
+	// are preserved in the raw map for future runtime validation.
+	Schema map[string]any `yaml:"schema,omitempty"`
 }
 
 type Message struct {
