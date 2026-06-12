@@ -20,13 +20,15 @@ func (r *recPub) Publish(_ context.Context, exchange, routingKey string, body []
 }
 
 type recSub struct {
-	queue   string
-	handler func(ctx context.Context, routingKey string, body []byte) error
+	queue       string
+	bindingKeys []string
+	handler     func(ctx context.Context, routingKey string, body []byte) error
 }
 
-func (r *recSub) Subscribe(_ context.Context, queueName string,
+func (r *recSub) Subscribe(_ context.Context, queueName string, bindingKeys []string,
 	handler func(ctx context.Context, routingKey string, body []byte) error) error {
 	r.queue = queueName
+	r.bindingKeys = bindingKeys
 	r.handler = handler
 	return nil
 }
@@ -55,6 +57,10 @@ func TestSubscribeJobResult_AcceptsTypedEnum(t *testing.T) {
 	}
 	if tr.queue != "rollback.results" {
 		t.Errorf("queue = %q, want rollback.results", tr.queue)
+	}
+	// The binding-key expression applies the same string(enum) cast.
+	if len(tr.bindingKeys) != 1 || tr.bindingKeys[0] != "rollback.results" {
+		t.Errorf("bindingKeys = %v, want [rollback.results]", tr.bindingKeys)
 	}
 }
 

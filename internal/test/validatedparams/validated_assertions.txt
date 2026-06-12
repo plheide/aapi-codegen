@@ -23,7 +23,7 @@ type recSub struct {
 	queue string
 }
 
-func (r *recSub) Subscribe(_ context.Context, queueName string,
+func (r *recSub) Subscribe(_ context.Context, queueName string, _ []string,
 	_ func(ctx context.Context, routingKey string, body []byte) error) error {
 	r.queue = queueName
 	return nil

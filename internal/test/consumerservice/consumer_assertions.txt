@@ -26,13 +26,15 @@ import (
 // fakeSubscribeTransport records what the Subscriber wired up and lets
 // each test drive a synthetic delivery.
 type fakeSubscribeTransport struct {
-	queue   string
-	handler func(ctx context.Context, routingKey string, body []byte) error
+	queue       string
+	bindingKeys []string
+	handler     func(ctx context.Context, routingKey string, body []byte) error
 }
 
-func (f *fakeSubscribeTransport) Subscribe(_ context.Context, queueName string,
+func (f *fakeSubscribeTransport) Subscribe(_ context.Context, queueName string, bindingKeys []string,
 	handler func(ctx context.Context, routingKey string, body []byte) error) error {
 	f.queue = queueName
+	f.bindingKeys = bindingKeys
 	f.handler = handler
 	return nil
 }
@@ -61,6 +63,10 @@ func TestSubscribeWorkItem_QueueNameInterpolation(t *testing.T) {
 	}
 	if tr.queue != "acme.work" {
 		t.Errorf("queue name = %q, want %q", tr.queue, "acme.work")
+	}
+	// Queue-mode channel: binding keys mirror the interpolated address.
+	if len(tr.bindingKeys) != 1 || tr.bindingKeys[0] != "acme.work" {
+		t.Errorf("bindingKeys = %v, want [acme.work]", tr.bindingKeys)
 	}
 	if tr.handler == nil {
 		t.Fatal("handler not registered with transport")
@@ -156,6 +162,9 @@ func TestSubscribeDeadLetter_StaticQueueName(t *testing.T) {
 	}
 	if tr.queue != "dlq.consumer-service" {
 		t.Errorf("queue = %q, want %q", tr.queue, "dlq.consumer-service")
+	}
+	if len(tr.bindingKeys) != 1 || tr.bindingKeys[0] != "dlq.consumer-service" {
+		t.Errorf("bindingKeys = %v, want [dlq.consumer-service]", tr.bindingKeys)
 	}
 	body, _ := json.Marshal(DeadLetter{OriginalRoutingKey: "rk", Reason: "nope"})
 	if err := tr.handler(context.Background(), "dlq.consumer-service", body); err != nil {
