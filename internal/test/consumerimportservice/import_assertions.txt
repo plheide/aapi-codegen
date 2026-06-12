@@ -18,7 +18,7 @@ type fakeSub struct {
 	handler func(ctx context.Context, routingKey string, body []byte) error
 }
 
-func (f *fakeSub) Subscribe(_ context.Context, queueName string,
+func (f *fakeSub) Subscribe(_ context.Context, queueName string, _ []string,
 	handler func(ctx context.Context, routingKey string, body []byte) error) error {
 	f.queue = queueName
 	f.handler = handler

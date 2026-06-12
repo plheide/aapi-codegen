@@ -120,6 +120,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`bindingsservice/`](internal/test/bindingsservice/) | **v0.3** — `SendOption` + message/operation AMQP bindings (priority, expiration, contentEncoding, messageType) |
 | [`enumparams/`](internal/test/enumparams/) | **v0.4** — typed channel parameters from `schema.type: string + enum`, dedup across publisher + subscriber |
 | [`validatedparams/`](internal/test/validatedparams/) | **v0.4.1** — pattern-validated parameters with `NewX`/`MustX` constructors; `omit-validation` falls back to plain `string` |
+| [`sharedqueueservice/`](internal/test/sharedqueueservice/) | **v0.6** — routingKey-mode consumer whose `x-aapi-codegen.queue.name` differs from the channel address; Subscribe passes queue name + binding keys separately |
 
 ## Status
 
@@ -167,7 +168,7 @@ aapi-codegen covers both publisher and subscriber AMQP code generation from Asyn
   - `Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` — spec bindings become defaults; opts override per call.
   - Helpers: `WithContentType`, `WithContentEncoding`, `WithMessageType`, `WithPriority`, `WithExpirationMillis`.
 - **Subscriber** ([example](internal/test/consumerservice/consumer_assertions.txt)):
-  - `SubscribeTransport.Subscribe(ctx, queueName, handler func(ctx, routingKey, body) error) error` — blocks until ctx cancellation or fatal transport error.
+  - `SubscribeTransport.Subscribe(ctx, queueName string, bindingKeys []string, handler func(ctx, routingKey, body) error) error` (**v0.6**) — blocks until ctx cancellation or fatal transport error. `queueName` comes from `bindings.{amqp,x-aapi-codegen}.queue.name` (falling back to the address); `bindingKeys` always derive from the channel address, so a shared queue bound to a fixed routing key (queue ≠ key) is expressible.
   - `<MessageName>Handler.Handle<MessageName>(ctx, msg) error` — implement on your consumer.
   - **Ack semantics**: `nil` → ack; `errors.Is(err, ErrDrop)` → nack-no-requeue (poison); any other err → nack-with-requeue. The dispatch wrapper joins `json.Unmarshal` failures with `ErrDrop` so malformed payloads can never loop forever.
 

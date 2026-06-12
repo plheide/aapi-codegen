@@ -1,0 +1,75 @@
+// Runtime assertions for v0.6 queue-name ≠ binding-key subscribers.
+// Drops into the tmp module produced by sharedqueue_test.go.
+
+package sharedqueuev1
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+)
+
+type recSub struct {
+	queue       string
+	bindingKeys []string
+	handler     func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (r *recSub) Subscribe(_ context.Context, queueName string, bindingKeys []string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue = queueName
+	r.bindingKeys = bindingKeys
+	r.handler = handler
+	return nil
+}
+
+// TestSubscribeStatusEvent_QueueAndBindingKeyDiffer is the v0.6 core
+// contract: the transport receives the declared queue name AND the
+// address-derived binding key as separate values.
+func TestSubscribeStatusEvent_QueueAndBindingKeyDiffer(t *testing.T) {
+	tr := &recSub{}
+	type fn func(ctx context.Context, msg StatusEvent) error
+	var h fn = func(_ context.Context, _ StatusEvent) error { return nil }
+	if err := NewSubscriber(tr).SubscribeStatusEvent(context.Background(), seHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "shared-status-worker" {
+		t.Errorf("queue = %q, want shared-status-worker (from x-aapi-codegen.queue.name)", tr.queue)
+	}
+	if len(tr.bindingKeys) != 1 || tr.bindingKeys[0] != "status.events" {
+		t.Errorf("bindingKeys = %v, want [status.events] (from channel address)", tr.bindingKeys)
+	}
+	if tr.queue == tr.bindingKeys[0] {
+		t.Error("fixture must keep queue name and binding key distinct — that's the case under test")
+	}
+}
+
+// TestSubscribeStatusEvent_DispatchStillWorks: the decode→handler path
+// is unchanged by the new transport signature.
+func TestSubscribeStatusEvent_DispatchStillWorks(t *testing.T) {
+	tr := &recSub{}
+	var got StatusEvent
+	called := false
+	type fn func(ctx context.Context, msg StatusEvent) error
+	var h fn = func(_ context.Context, msg StatusEvent) error {
+		got = msg
+		called = true
+		return nil
+	}
+	if err := NewSubscriber(tr).SubscribeStatusEvent(context.Background(), seHandlerAdapter(h)); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	body, _ := json.Marshal(StatusEvent{ID: "s-1", State: "completed"})
+	if err := tr.handler(context.Background(), "status.events", body); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !called || got.ID != "s-1" || got.State != "completed" {
+		t.Errorf("handler not called correctly: called=%v msg=%+v", called, got)
+	}
+}
+
+type seHandlerAdapter func(ctx context.Context, msg StatusEvent) error
+
+func (a seHandlerAdapter) HandleStatusEvent(ctx context.Context, msg StatusEvent) error {
+	return a(ctx, msg)
+}

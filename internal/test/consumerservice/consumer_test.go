@@ -48,10 +48,15 @@ func TestV02_ReceiveOperations(t *testing.T) {
 		"type DeadLetterHandler interface",
 		"HandleDeadLetter(ctx context.Context, msg DeadLetter) error",
 		"func (s *Subscriber) SubscribeDeadLetter(",
+		// v0.6: transport contract carries binding keys separately from
+		// the queue name (queue-mode channels: keys mirror the address).
+		"Subscribe(ctx context.Context, queueName string, bindingKeys []string, handler func(ctx context.Context, routingKey string, body []byte) error) error",
 		// Templated queue name interpolates the tenant arg:
 		`queueName := tenant + ".work"`,
+		`bindingKeys := []string{tenant + ".work"}`,
 		// Static queue name appears as a literal:
 		`queueName := "dlq.consumer-service"`,
+		`bindingKeys := []string{"dlq.consumer-service"}`,
 		// Poison payloads get joined with ErrDrop:
 		"errors.Join(ErrDrop, err)",
 	} {

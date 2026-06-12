@@ -1,0 +1,54 @@
+asyncapi: 3.1.0
+info:
+  title: SharedQueueService — shared queue, distinct binding key
+  version: 1.0.0
+  description: |
+    v0.6 fixture: a routingKey-mode consumer channel whose declared queue
+    name differs from the channel address. Models the "single shared queue
+    bound to a fixed routing key on a direct exchange" worker shape (e.g.
+    a status-event consumer whose queue `shared-status-worker` is bound to
+    a status exchange with the fixed key `status.events`).
+
+    The queue topology lives under `bindings.x-aapi-codegen.queue` because
+    AsyncAPI AMQP 0.3.0 disallows `bindings.amqp.queue` in routingKey mode
+    (v0.5.1 lowering rule). The generated Subscribe must pass the queue
+    name AND the address-derived binding key to the transport separately —
+    before v0.6 the binding key was silently assumed equal to the queue
+    name.
+
+defaultContentType: application/json
+
+channels:
+  statusEvents:
+    address: status.events
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: StatusExchange
+          type: direct
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue:
+          name: shared-status-worker
+          durable: true
+          autoDelete: false
+          exclusive: false
+    messages:
+      StatusEvent:
+        name: StatusEvent
+        contentType: application/json
+        payload:
+          type: object
+          required: [id, state]
+          additionalProperties: false
+          properties:
+            id: { type: string }
+            state: { type: string }
+
+operations:
+  consumeStatusEvent:
+    action: receive
+    channel: { $ref: '#/channels/statusEvents' }
+    messages:
+      - $ref: '#/channels/statusEvents/messages/StatusEvent'

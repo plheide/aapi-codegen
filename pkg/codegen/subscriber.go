@@ -29,6 +29,14 @@ const subscriberTemplate = `
 // satisfy this interface alone. The generated package never imports an
 // AMQP client library.
 //
+// queueName is the queue to declare/consume; bindingKeys are the
+// routing keys to bind that queue to the channel's exchange with. They
+// come from the spec independently (bindings.amqp.queue.name vs the
+// channel address), so a consumer whose queue name differs from its
+// binding key — e.g. a shared queue bound to a fixed routing key on a
+// direct exchange — is expressible. For queue-mode channels the two
+// are equal.
+//
 // Subscribe blocks until ctx is cancelled or a fatal transport error
 // occurs. It invokes handler once per delivery; the handler's return
 // drives ack semantics:
@@ -36,7 +44,7 @@ const subscriberTemplate = `
 //   - errors.Is(err, ErrDrop)     → nack, do not requeue (poison)
 //   - any other non-nil           → nack, requeue (transient)
 type SubscribeTransport interface {
-	Subscribe(ctx context.Context, queueName string, handler func(ctx context.Context, routingKey string, body []byte) error) error
+	Subscribe(ctx context.Context, queueName string, bindingKeys []string, handler func(ctx context.Context, routingKey string, body []byte) error) error
 }
 
 // ErrDrop signals that the current message should be acknowledged-and-
@@ -65,7 +73,8 @@ type {{.HandlerTypeName}} interface {
 }
 
 // {{.GoFuncName}} starts consuming {{.Message.QualifiedGoType}} messages from
-// the queue named "{{.Queue.NameExpr}}" (from bindings.amqp.queue.name).
+// the queue named "{{.Queue.NameExpr}}" (from bindings.amqp.queue.name),
+// bound with routing key "{{.Channel.Address.Raw}}" (the channel address).
 // Blocks until ctx is cancelled or a fatal transport error occurs.
 // Generated from operations.{{.Name}} (channel {{.Channel.Name}}).
 func (s *Subscriber) {{.GoFuncName}}(
@@ -76,7 +85,8 @@ func (s *Subscriber) {{.GoFuncName}}(
 	handler {{.HandlerTypeName}},
 ) error {
 	queueName := {{.Queue.NameExprGo}}
-	return s.transport.Subscribe(ctx, queueName, func(ctx context.Context, routingKey string, body []byte) error {
+	bindingKeys := []string{ {{.BindingKeysExprGo}} }
+	return s.transport.Subscribe(ctx, queueName, bindingKeys, func(ctx context.Context, routingKey string, body []byte) error {
 		var msg {{.Message.QualifiedGoType}}
 		if err := json.Unmarshal(body, &msg); err != nil {
 			// A payload that doesn't unmarshal will never unmarshal —
@@ -101,6 +111,11 @@ type subscriberOpView struct {
 	Channel           publisherChannelView
 	Message           *ir.Message
 	Queue             subscriberQueueView
+	// BindingKeysExprGo is the Go expression for the routing key the
+	// queue is bound with — always derived from the channel address
+	// (Address.RoutingKeyExpr), independent of the queue name. Equal to
+	// Queue.NameExprGo for queue-mode channels where address == queue.
+	BindingKeysExprGo string
 }
 
 type subscriberQueueView struct {
@@ -143,6 +158,7 @@ func RenderSubscriber(spec *ir.Spec) (string, error) {
 				NameExpr:   queueNameTemplate(amqp, op.Channel.Address),
 				NameExprGo: queueExpr,
 			},
+			BindingKeysExprGo: op.Channel.Address.RoutingKeyExpr(),
 		})
 	}
 	if len(view.Operations) == 0 {
