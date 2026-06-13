@@ -1,0 +1,125 @@
+// Runtime assertions for v0.7 one-queue / many-message-types subscribers.
+// Drops into the tmp module produced by multimessage_test.go.
+
+package multimessagev1
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+)
+
+type recSub struct {
+	queue       string
+	bindingKeys []string
+	handler     func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (r *recSub) Subscribe(_ context.Context, queueName string, bindingKeys []string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue = queueName
+	r.bindingKeys = bindingKeys
+	r.handler = handler
+	return nil
+}
+
+// capture implements the combined EventsWorkerHandler by recording which
+// typed method the dispatch invoked.
+type capture struct {
+	created *CreatedEvent
+	updated *UpdatedEvent
+}
+
+func (c *capture) HandleCreatedEvent(_ context.Context, m CreatedEvent) error {
+	cc := m
+	c.created = &cc
+	return nil
+}
+
+func (c *capture) HandleUpdatedEvent(_ context.Context, m UpdatedEvent) error {
+	uu := m
+	c.updated = &uu
+	return nil
+}
+
+// TestSubscribeEventsWorker_QueueAndBindingKeys: one Subscribe call binds
+// the shared queue to both addresses, in operation (alphabetical) order.
+func TestSubscribeEventsWorker_QueueAndBindingKeys(t *testing.T) {
+	tr := &recSub{}
+	if err := NewSubscriber(tr).SubscribeEventsWorker(context.Background(), &capture{}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if tr.queue != "events-worker" {
+		t.Errorf("queue = %q, want events-worker", tr.queue)
+	}
+	if len(tr.bindingKeys) != 2 || tr.bindingKeys[0] != "events.created" || tr.bindingKeys[1] != "events.updated" {
+		t.Errorf("bindingKeys = %v, want [events.created events.updated]", tr.bindingKeys)
+	}
+}
+
+// TestSubscribeEventsWorker_DispatchesByRoutingKey is the v0.7 core
+// contract: the routing key — not the payload shape — selects the handler.
+func TestSubscribeEventsWorker_DispatchesByRoutingKey(t *testing.T) {
+	tr := &recSub{}
+	cap := &capture{}
+	if err := NewSubscriber(tr).SubscribeEventsWorker(context.Background(), cap); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	createdBody, _ := json.Marshal(map[string]any{"id": "c-1", "name": "n"})
+	if err := tr.handler(context.Background(), "events.created", createdBody); err != nil {
+		t.Fatalf("dispatch created: %v", err)
+	}
+	if cap.created == nil || cap.created.ID != "c-1" {
+		t.Errorf("created not handled: %+v", cap.created)
+	}
+	if cap.updated != nil {
+		t.Errorf("updated handler wrongly called for events.created key")
+	}
+
+	updatedBody, _ := json.Marshal(map[string]any{"id": "u-1", "revision": 2})
+	if err := tr.handler(context.Background(), "events.updated", updatedBody); err != nil {
+		t.Fatalf("dispatch updated: %v", err)
+	}
+	if cap.updated == nil || cap.updated.ID != "u-1" {
+		t.Errorf("updated not handled: %+v", cap.updated)
+	}
+
+	// Proof that the KEY decides: an updated-shaped payload (has revision)
+	// delivered on the created key routes to CreatedEvent, not UpdatedEvent.
+	cap2 := &capture{}
+	tr2 := &recSub{}
+	_ = NewSubscriber(tr2).SubscribeEventsWorker(context.Background(), cap2)
+	if err := tr2.handler(context.Background(), "events.created", updatedBody); err != nil {
+		t.Fatalf("dispatch updated-shaped on created key: %v", err)
+	}
+	if cap2.created == nil || cap2.created.ID != "u-1" {
+		t.Errorf("updated-shaped payload on created key must route to CreatedEvent, got %+v / %+v", cap2.created, cap2.updated)
+	}
+	if cap2.updated != nil {
+		t.Errorf("routing must follow the key, not the payload shape")
+	}
+}
+
+// TestSubscribeEventsWorker_UnknownKeyDrops: a delivery on a routing key
+// with no handler is dropped (nack without requeue), never requeued.
+func TestSubscribeEventsWorker_UnknownKeyDrops(t *testing.T) {
+	tr := &recSub{}
+	_ = NewSubscriber(tr).SubscribeEventsWorker(context.Background(), &capture{})
+	err := tr.handler(context.Background(), "events.deleted", []byte(`{"id":"x"}`))
+	if err == nil || !errors.Is(err, ErrDrop) {
+		t.Errorf("unknown routing key: err = %v, want ErrDrop", err)
+	}
+}
+
+// TestSubscribeEventsWorker_PoisonDrops: an undecodable payload on a known
+// key is dropped, not requeued.
+func TestSubscribeEventsWorker_PoisonDrops(t *testing.T) {
+	tr := &recSub{}
+	_ = NewSubscriber(tr).SubscribeEventsWorker(context.Background(), &capture{})
+	err := tr.handler(context.Background(), "events.created", []byte("not json"))
+	if err == nil || !errors.Is(err, ErrDrop) {
+		t.Errorf("poison payload: err = %v, want ErrDrop", err)
+	}
+}
