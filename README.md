@@ -121,6 +121,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`enumparams/`](internal/test/enumparams/) | **v0.4** — typed channel parameters from `schema.type: string + enum`, dedup across publisher + subscriber |
 | [`validatedparams/`](internal/test/validatedparams/) | **v0.4.1** — pattern-validated parameters with `NewX`/`MustX` constructors; `omit-validation` falls back to plain `string` |
 | [`sharedqueueservice/`](internal/test/sharedqueueservice/) | **v0.6** — routingKey-mode consumer whose `x-aapi-codegen.queue.name` differs from the channel address; Subscribe passes queue name + binding keys separately |
+| [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | **v0.7** — several receive ops sharing one queue (distinct fixed routing keys, distinct message types); one combined `Subscribe<Queue>` binds all keys and dispatches by routing key |
 
 ## Status
 

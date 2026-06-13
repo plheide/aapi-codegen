@@ -1,0 +1,85 @@
+asyncapi: 3.1.0
+info:
+  title: MultiMessageQueueService — one shared queue, many message types
+  version: 1.0.0
+  description: |
+    v0.7 fixture: two routingKey-mode receive operations share ONE queue
+    (x-aapi-codegen.queue.name: events-worker) on a direct exchange, each
+    bound with a distinct fixed routing key carrying a distinct message
+    type. The generated Subscriber must emit ONE combined
+    SubscribeEventsWorker(ctx, handler) that binds both keys and dispatches
+    by routing key — NOT two competing per-message Subscribers, which would
+    mis-route (an UpdatedEvent payload also unmarshals cleanly into a
+    CreatedEvent, so only the routing key disambiguates them).
+
+defaultContentType: application/json
+
+x-aapi-codegen:
+  omit-publishers: true
+
+channels:
+  created:
+    address: events.created
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: EventsExchange
+          type: direct
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue:
+          name: events-worker
+          durable: true
+          autoDelete: false
+          exclusive: false
+    messages:
+      CreatedEvent:
+        name: CreatedEvent
+        contentType: application/json
+        payload:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string }
+            name: { type: string }
+
+  updated:
+    address: events.updated
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: EventsExchange
+          type: direct
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue:
+          name: events-worker
+          durable: true
+          autoDelete: false
+          exclusive: false
+    messages:
+      UpdatedEvent:
+        name: UpdatedEvent
+        contentType: application/json
+        payload:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            revision: { type: integer }
+
+operations:
+  consumeCreated:
+    action: receive
+    channel: { $ref: '#/channels/created' }
+    messages:
+      - $ref: '#/channels/created/messages/CreatedEvent'
+
+  consumeUpdated:
+    action: receive
+    channel: { $ref: '#/channels/updated' }
+    messages:
+      - $ref: '#/channels/updated/messages/UpdatedEvent'
