@@ -3,25 +3,20 @@
 # build/archive shape so consumers can use a near-identical
 # use-aapi-codegen.sh script (see examples/use-aapi-codegen.sh).
 #
-# A successful build requires the patched go-jsonschema fork to be
-# checked out as a sibling at ../go-jsonschema, because aapi-codegen's
-# go.mod has a `replace github.com/atombender/go-jsonschema =>
-# ../go-jsonschema` directive. The release workflow handles this via
-# actions/checkout@v6 with `path:` set per repo.
-#
-# Distribution model: GitHub Releases only. No Docker image, no
-# Homebrew tap — kept lean while the tool is single-consumer. Matches
-# the download-and-cache pattern in examples/use-aapi-codegen.sh
-# (modelled on plheide/go-jsonschema's use-go-jsonschema.sh).
+# Distribution model: GitHub Releases, plus `go install` straight from
+# the module. No Docker image, no Homebrew tap — kept lean while the
+# tool is single-consumer. Matches the download-and-cache pattern in
+# examples/use-aapi-codegen.sh (modelled on plheide/go-jsonschema's
+# use-go-jsonschema.sh).
 
 version: 2
 project_name: aapi-codegen
 
-# No `before:` hooks. `go mod tidy` lives in the release workflow's
-# pre-flight step (single source of truth). Running it again here would
-# duplicate work and — worse — if the second tidy produced a different
-# result, goreleaser would see a dirty git workdir and abort mid-
-# release after the tag was already pushed.
+# No `before:` hooks, in particular no `go mod tidy`: a tidy that changed
+# anything would leave a dirty git workdir and make goreleaser abort
+# mid-release after the tag was already pushed. The release workflow's
+# pre-flight runs `go mod tidy -diff` instead, which fails without
+# rewriting.
 
 builds:
   - main: ./cmd/aapi-codegen

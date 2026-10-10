@@ -3,7 +3,7 @@ module github.com/plheide/aapi-codegen
 go 1.26
 
 require (
-	github.com/atombender/go-jsonschema v0.0.0-00010101000000-000000000000
+	github.com/plheide/go-jsonschema v0.25.0-rc.5
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -15,9 +15,3 @@ require (
 	github.com/sanity-io/litter v1.5.8 // indirect
 	github.com/sosodev/duration v1.4.0 // indirect
 )
-
-// The patched local fork at ../go-jsonschema is the canonical
-// implementation aapi-codegen builds against. Upstream may not yet
-// expose every flag the local fork does — when it catches up, drop the
-// replace and pin a tag.
-replace github.com/atombender/go-jsonschema => ../go-jsonschema
