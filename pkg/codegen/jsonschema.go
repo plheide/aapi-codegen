@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/atombender/go-jsonschema/pkg/generator"
+	"github.com/plheide/go-jsonschema/pkg/generator"
 )
 
 // runJSONSchemaInProcess invokes go-jsonschema as a library, replacing
 // the M1–M4 subprocess shell-out to /tmp/go-jsonschema-local. Plan §3
-// settled this in M5: the sibling fork exposes a stable
+// settled this in M5: the go-jsonschema fork exposes a stable
 // generator.New(Config) → DoFile → Sources() API, so vendoring or
 // shelling out are both unnecessary.
 //

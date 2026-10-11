@@ -98,11 +98,11 @@ Requires Go 1.26+. The `go.mod` directive sets the floor; CI tracks the version 
 go test ./...
 ```
 
-The build is a single Go binary. The patched `go-jsonschema` fork is wired in via local `replace` in [go.mod](go.mod) pointing at a sibling `../go-jsonschema` checkout — clone both repos as siblings under one root.
+The build is a single Go binary. The JSON Schema pass comes from the [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema) fork, pinned in [go.mod](go.mod) like any other dependency; a plain clone builds.
 
-PRs run `go vet`, `go test -race`, `golangci-lint`, and a goreleaser snapshot build via [`.github/workflows/development.yaml`](.github/workflows/development.yaml). Tag pushes (`vX.Y.Z` and `vX.Y.Z-rc.N`) trigger the release workflow.
+PRs run `go mod tidy -diff`, `go vet`, `go test -race`, `golangci-lint`, and a goreleaser snapshot build via [`.github/workflows/development.yaml`](.github/workflows/development.yaml). Tag pushes (`vX.Y.Z` and `vX.Y.Z-rc.N`) trigger the release workflow.
 
-For distribution to downstream consumers, see [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh) — a download-and-cache script modelled on `plheide/go-jsonschema`'s `use-go-jsonschema.sh`. Pinning the binary version this way avoids the `go install`/replace-directive incompatibility. Supports Linux, macOS, and Windows (via Git Bash / WSL).
+Install a released version with `go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@VERSION` (v0.8.0 and later), or download a release archive. To pin the version per consuming repo, see [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh) — a download-and-cache script modelled on `plheide/go-jsonschema`'s `use-go-jsonschema.sh`. Supports Linux, macOS, and Windows (via Git Bash / WSL).
 
 ### Examples
 
@@ -205,7 +205,7 @@ aapi-codegen delegates the JSON Schema → Go pass to [plheide/go-jsonschema](ht
 
 ### Distribution
 
-- [x] `go build ./cmd/aapi-codegen` from a sibling-checkout layout
+- [x] `go build ./cmd/aapi-codegen` from a plain clone
 - [x] GoReleaser config + GitHub Actions workflow for release archives ([`.goreleaser.yaml`](.goreleaser.yaml), [`.github/workflows/release.yaml`](.github/workflows/release.yaml))
 - [x] Download-and-cache consumer script ([`examples/use-aapi-codegen.sh`](examples/use-aapi-codegen.sh))
-- [ ] `go install` from a fully-resolved module — blocked on dropping the `replace` directive (requires either upstream-merging the go-jsonschema patches, or remapping the fork's module path).
+- [x] `go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@VERSION` (v0.8.0 and later; the module has no `replace` directives)

@@ -1,19 +1,15 @@
 ---
 # Development CI for aapi-codegen.
 #
-# Runs on every push to main and every PR: lint + vet + tests with
-# coverage + a snapshot goreleaser build. Coverage uploads to Codecov;
-# the snapshot build catches release-config drift well before the next
-# tag push tries to use it.
+# Runs on every push to main and every PR: lint + tidy check + vet +
+# tests with coverage + a snapshot goreleaser build. Coverage uploads to
+# Codecov; the snapshot build catches release-config drift well before
+# the next tag push tries to use it.
 #
-# Same two-checkout dance as release.yaml — aapi-codegen's go.mod has
-# a `replace github.com/atombender/go-jsonschema => ../go-jsonschema`
-# directive, so the build needs both repos checked out as siblings.
-#
-# Versions (AAPI_GJS_VERSION, GO_VERSION, GOLANGCI_LINT_VERSION, ...)
-# live in .github/versions.env and are loaded into $GITHUB_ENV by the
-# "Load versions" step below. Same file is loaded by release.yaml,
-# guaranteeing CI and release build against identical versions.
+# Tool versions (GO_VERSION, GOLANGCI_LINT_VERSION) live in
+# .github/versions.env and are loaded into $GITHUB_ENV by the "Load
+# versions" step below. Same file is loaded by release.yaml,
+# guaranteeing CI and release build with identical tool versions.
 
 name: development
 on:
@@ -32,32 +28,20 @@ jobs:
   qa:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout aapi-codegen
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           fetch-depth: 1
-          path: aapi-codegen
       - name: Load versions
         # $GITHUB_ENV's format is strict KEY=VALUE only — comments and
         # blank lines from versions.env would fail with "Invalid format".
         # Filter to lines that look like environment-variable
         # assignments before appending.
-        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' aapi-codegen/.github/versions.env >> "$GITHUB_ENV"
-      - name: Checkout go-jsonschema (sibling for the replace directive)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          repository: ${{ env.AAPI_GJS_REPO }}
-          ref: ${{ env.AAPI_GJS_VERSION }}
-          path: go-jsonschema
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/versions.env >> "$GITHUB_ENV"
       - name: Setup Golang
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
-          # actions/setup-go's module cache looks for go.sum at the
-          # workflow's working directory; aapi-codegen lives in a
-          # subdir (per the two-checkout layout) so point cache lookup
-          # there explicitly.
-          cache-dependency-path: aapi-codegen/go.sum
 
       # Install golangci-lint via the upstream install script, matching
       # plheide/go-jsonschema's pattern (same tool, same version, same
@@ -68,19 +52,20 @@ jobs:
       - name: Install golangci-lint
         run: sh /tmp/install-golangci-lint.sh -b /usr/local/bin ${{ env.GOLANGCI_LINT_VERSION }}
       - name: Lint
-        working-directory: aapi-codegen
         run: golangci-lint -v run --color=always --config=.golangci.yml ./...
 
+      # Fails (printing the diff) instead of rewriting, so an untidy
+      # go.mod / go.sum is caught here rather than at release time.
+      - name: Check go.mod and go.sum are tidy
+        run: go mod tidy -diff
       - name: Vet
-        working-directory: aapi-codegen
         run: go vet ./...
       - name: Test with coverage
-        working-directory: aapi-codegen
         run: go test ./... -race -count=1 -coverprofile=coverage.out -covermode=atomic
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6
         with:
-          files: aapi-codegen/coverage.out
+          files: coverage.out
           # CODECOV_TOKEN required for private repos; harmless to set
           # always (Codecov's tokenless flow for public repos still
           # works when the secret is empty).
@@ -102,5 +87,4 @@ jobs:
         with:
           distribution: goreleaser
           version: 2.15.4
-          workdir: aapi-codegen
           args: build --verbose --snapshot --clean --single-target
