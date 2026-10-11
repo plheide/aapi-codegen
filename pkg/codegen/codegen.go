@@ -227,6 +227,9 @@ func Generate(specPath string, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := checkDuplicateDeclarations(combined); err != nil {
+		return "", err
+	}
 	if err := os.WriteFile(cfg.Output, combined, 0o600); err != nil {
 		return "", fmt.Errorf("write output: %w", err)
 	}
