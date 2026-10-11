@@ -45,7 +45,7 @@ aapi-codegen -config aapi-codegen.config.yaml SPEC.asyncapi.yaml
 | --- | --- |
 | `-o` | `./types.gen.go` |
 | `-package` | The output directory's name. For a version directory (`v1`, `v2`, …) the parent's name comes first: `lib/schemas/order-event/v1` → `ordereventv1`. |
-| `-config` | None. The file takes the keys listed under [Spec extensions](#spec-extensions). |
+| `-config` | None. A YAML file with any of `package`, `output`, `schema-packages`, `message-packages`, `omit-validation` and `capitalization`; see [Spec extensions](#spec-extensions). |
 
 ## Spec extensions
 
@@ -67,7 +67,7 @@ x-aapi-codegen:
       alias: commonv1
 ```
 
-The optional `-config` file accepts `package`, `output`, `schema-packages`, `message-packages`, `omit-validation`, and `capitalization` (initialisms added to the default `ID` and `URL`). Either the spec or the config file can opt out of validation; neither overrides the other's opt-out.
+The optional `-config` file accepts only `package`, `output`, `schema-packages`, `message-packages`, `omit-validation`, and `capitalization` (initialisms added to the default `ID` and `URL`); any other key is an error. `omit-publishers`, `omit-subscribers` and the `queue` binding work only in the spec. Either the spec or the config file can opt out of validation; neither overrides the other's opt-out.
 
 ## Inline payloads and `components`
 
