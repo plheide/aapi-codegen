@@ -1,0 +1,27 @@
+---
+# Weekly version updates, one grouped PR per ecosystem. Security updates
+# are enabled separately in the repository settings.
+#
+# Not covered: GO_VERSION and GOLANGCI_LINT_VERSION in
+# .github/versions.env, which are bumped by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      github-actions:
+        patterns: ["*"]
