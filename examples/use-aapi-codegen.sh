@@ -7,9 +7,11 @@
 # file into the consuming repo's scripts/ directory unchanged (or adapt
 # the defaults at the top if you want a different fork or version pin).
 #
-# Pin the version with the AAPI_VERSION env var; default tracks the
-# fork tag the schema generators in the consuming repo were tested
-# against. Bump it as a single-file diff to roll forward.
+# Pin the version with the AAPI_VERSION env var. In this copy the
+# default is the latest aapi-codegen release, bumped in the change
+# that precedes each release tag. In a consuming repo, set it to the
+# version your specs were generated with, and roll forward with a
+# one-line diff.
 #
 # Usage:
 #   BIN=$(/path/to/scripts/use-aapi-codegen.sh)
@@ -27,7 +29,7 @@
 # offline.
 set -euo pipefail
 
-AAPI_VERSION="${AAPI_VERSION:-v0.1.0}"
+AAPI_VERSION="${AAPI_VERSION:-v0.8.0-rc.1}"
 AAPI_REPO="${AAPI_REPO:-plheide/aapi-codegen}"
 AAPI_CACHE="${AAPI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen/${AAPI_VERSION}}"
 
