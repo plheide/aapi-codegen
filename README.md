@@ -1,35 +1,63 @@
 # aapi-codegen
 
-AsyncAPI 3.x → Go code generator. The AsyncAPI counterpart to `oapi-codegen` (same idea, different spec). Builds on `go-jsonschema` (imported as a library) for the JSON Schema → Go pass.
+[![GitHub release](https://img.shields.io/github/v/release/plheide/aapi-codegen?include_prereleases&style=flat)](https://github.com/plheide/aapi-codegen/releases)
+[![GitHub Workflow Status (event)](https://img.shields.io/github/actions/workflow/status/plheide/aapi-codegen/development.yaml?style=flat)](https://github.com/plheide/aapi-codegen/actions?workflow=development)
+[![Go Reference](https://pkg.go.dev/badge/github.com/plheide/aapi-codegen.svg)](https://pkg.go.dev/github.com/plheide/aapi-codegen)
+[![License](https://img.shields.io/github/license/plheide/aapi-codegen?style=flat)](LICENSE)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/plheide/aapi-codegen?style=flat)](go.mod)
 
-Generates, from one `*.source.asyncapi.yaml`, one Go package containing:
+AsyncAPI 3.x → Go code generator, the AsyncAPI counterpart to [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen). From one AsyncAPI spec it generates one Go file with typed payloads and AMQP publishers and subscribers. The JSON Schema → Go pass is [go-jsonschema](https://github.com/plheide/go-jsonschema), used as a library.
 
-- **Payload types** for every message (via `go-jsonschema`).
-- **Typed Publisher** with `Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` per `action: send` operation (v0.1+).
-- **Typed Subscriber** with `<MessageName>Handler` interface + `Subscribe<MessageName>(ctx, ...params, handler) error` per `action: receive` operation (v0.2+).
-- **`PublishProperties`** + `SendOption` (`WithPriority`, `WithExpirationMillis`, …) honoring message/operation AMQP bindings (v0.3+).
-- **Typed channel parameters** — enums become `type X string` + const block (v0.4); pattern-validated parameters become `type X string` + `NewX`/`MustX` constructors that regex-check input (v0.4.1).
+## What it generates
+
+- **Payload types** for every message, with `UnmarshalJSON` methods that enforce the schema ([Validation](#validation)).
+- **A Publisher** with one method per `action: send` operation, named after the operation key: `sendOrder` becomes `SendOrder(ctx, ...params, msg, opts ...SendOption) error`. The spec's AMQP bindings set the default message properties; `SendOption`s override them per call.
+- **A Subscriber** with a `<Msg>Handler` interface and a `Subscribe<Msg>(ctx, ...params, handler) error` method per `action: receive` operation. Several receive operations on one queue share a single `Subscribe<Queue>` method that dispatches by routing key.
+- **Typed channel parameters.** A string `enum` becomes `type X string` with one constant per value (`JobTypeBuild`). A string `pattern` becomes `type X string` with `NewX` / `MustX` constructors that check the pattern.
+
+The generated package doesn't import an AMQP client. You implement two small interfaces, `Transport` and `SubscribeTransport`, around the client you use, such as `amqp091-go`.
+
+## Install
+
+```shell
+go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.1
+```
+
+Or run it from a `go:generate` directive without installing it:
+
+```go
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.1 -o types.gen.go spec.asyncapi.yaml
+```
+
+Pin the version: until v0.8.0 is final, `@latest` resolves to v0.7.0, which `go install` can't build.
+
+Release archives for Linux, macOS and Windows (amd64 and arm64) are on the [releases page](https://github.com/plheide/aapi-codegen/releases). To pin a version per repository without a Go toolchain, copy [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh). It downloads the archive once, caches the binary and prints its path; it works on Linux, macOS and Windows (Git Bash or WSL).
 
 ## Usage
 
-Minimal:
-
 ```shell
 aapi-codegen SPEC.asyncapi.yaml
-```
-
-Defaults: `-o ./types.gen.go`, package derived from the output directory's basename (with the `v1`/`v2` version-folder rule prepending the parent — `lib/schemas/order-event/v1` → `ordereventv1`).
-
-With overrides:
-
-```shell
 aapi-codegen -package PKG -o OUT.go SPEC.asyncapi.yaml
-aapi-codegen -config aapi-codegen.config.yaml SPEC.asyncapi.yaml   # rare
+aapi-codegen -config aapi-codegen.config.yaml SPEC.asyncapi.yaml
 ```
 
-## Spec extension — `x-aapi-codegen`
+| Flag | Default |
+| --- | --- |
+| `-o` | `./types.gen.go` |
+| `-package` | The output directory's name. For a version directory (`v1`, `v2`, …) the parent's name comes first: `lib/schemas/order-event/v1` → `ordereventv1`. |
+| `-config` | None. A YAML file with any of `package`, `output`, `schema-packages`, `message-packages`, `omit-validation` and `capitalization`; see [Spec extensions](#spec-extensions). |
 
-Cross-tree `$ref` → import mappings live inside the AsyncAPI spec, colocated with the contract:
+## Spec extensions
+
+aapi-codegen reads its settings from an `x-aapi-codegen` extension in the spec, so they live next to the contract.
+
+| Where | Key | Effect | Since |
+| --- | --- | --- | --- |
+| root `x-aapi-codegen` | `schema-packages` | Maps a schema `$id` to a Go import. A payload `$ref` into that schema uses the imported type instead of generating a copy. | v0.1 |
+| root `x-aapi-codegen` | `message-packages` | Maps a producer's spec file to its generated Go package. See [Consuming another service's messages](#consuming-another-services-messages). | v0.5 |
+| root `x-aapi-codegen` | `omit-validation` | No validating `UnmarshalJSON`; pattern-typed channel parameters fall back to `string`. | v0.1 |
+| root `x-aapi-codegen` | `omit-publishers`, `omit-subscribers` | Skips that part of the output, even when the spec has matching operations. | v0.2 |
+| channel `bindings.x-aapi-codegen` | `queue: {name, durable, autoDelete, exclusive}` | The queue a consumer reads from when the channel is in `is: routingKey` mode, where AMQP binding 0.3.0 forbids `bindings.amqp.queue`. If both are set, `bindings.amqp.queue` wins. | v0.5.1 |
 
 ```yaml
 x-aapi-codegen:
@@ -39,11 +67,11 @@ x-aapi-codegen:
       alias: commonv1
 ```
 
-`$id` matches a schema's `$id` keyword. When a payload `$ref`s into a schema with that `$id`, the generated Go imports `commonv1` instead of inlining the type.
+The optional `-config` file accepts only `package`, `output`, `schema-packages`, `message-packages`, `omit-validation`, and `capitalization` (initialisms added to the default `ID` and `URL`); any other key is an error. `omit-publishers`, `omit-subscribers` and the `queue` binding work only in the spec. Either the spec or the config file can opt out of validation; neither overrides the other's opt-out.
 
-## Inline payloads + `components/schemas`
+## Inline payloads and `components`
 
-Payloads can be declared inline in the spec — no separate schema file needed:
+Payloads can be declared inline in the spec, with no separate schema file:
 
 ```yaml
 components:
@@ -65,32 +93,198 @@ channels:
             tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
 ```
 
-Payload Go type name defaults to the message key (`InlineMessage`); an inline `title` overrides. `components/schemas` types are generated once and shared.
+The payload's Go type is named after the message key (`InlineMessage`); an inline `title` overrides it. Types in `components.schemas` are generated once and shared. A payload can also `$ref` an external JSON Schema file.
 
-Shared message wrappers work the same way via `components.messages`: define the envelope once, reference it via `#/components/messages/X` from any number of channels. Multiple references dedupe to one generated Go payload type.
+Shared message definitions work the same way through `components.messages`: define the message once and `$ref` it as `#/components/messages/X` from any number of channels, and it generates one Go type. Operations may reference a message either through its channel (`#/channels/<channel>/messages/<key>`) or through `#/components/messages/<key>`.
+
+## Consuming another service's messages
+
+A consumer can use the message types its producer already generated, instead of generating its own copy. In the consumer's spec, `$ref` the producer's message across files and map the producer's spec file to its Go package:
+
+```yaml
+# consumer spec
+x-aapi-codegen:
+  message-packages:
+    - file: ../producer/producer.asyncapi.yaml
+      package: example.com/producer/ordersv1
+      alias: ordersv1
+  omit-publishers: true
+
+channels:
+  orderConsumer:
+    address: '{tenant}.orders'
+    parameters:
+      tenant: { description: Tenant identifier. }
+    bindings:
+      amqp:
+        is: queue
+    messages:
+      OrderMessage:
+        $ref: '../producer/producer.asyncapi.yaml#/channels/orderDispatch/messages/OrderMessage'
+
+operations:
+  consumeOrder:
+    action: receive
+    channel: { $ref: '#/channels/orderConsumer' }
+    messages:
+      - $ref: '#/channels/orderConsumer/messages/OrderMessage'
+```
+
+The generated handler takes the producer's type:
+
+```go
+type OrderMessageHandler interface {
+    HandleOrderMessage(ctx context.Context, msg ordersv1.OrderMessage) error
+}
+```
+
+- `file` is matched against the file part of the `$ref`, with both resolved relative to the consumer's spec.
+- The last segment of the `$ref` is used as the type name in the producer's package. That's the producer's message key, so the producer's payload must not set a different `title`.
+- A consumer-only spec usually sets `omit-publishers: true`.
+
+The [`consumerimportservice`](internal/test/consumerimportservice/) fixture is a complete producer/consumer pair.
+
+## Publisher
+
+```go
+type Transport interface {
+    Publish(ctx context.Context, exchange, routingKey string, body []byte, props PublishProperties) error
+}
+
+pub := NewPublisher(transport)
+err := pub.SendOrder(ctx, "acme", msg, WithPriority(5))
+```
+
+- There is one method per `action: send` operation, named after the operation key with its first letter capitalised (`sendOrder` → `SendOrder`).
+- Its arguments are `ctx`, one argument per address parameter in address order, the message, then options.
+- The routing key is the channel address with its parameters filled in. The exchange is `bindings.amqp.exchange.name`.
+- The default properties come from the spec:
+  - the content type from the message's `contentType`, or else `defaultContentType`;
+  - `contentEncoding` and `messageType` from the message's AMQP binding;
+  - `priority` and `expiration` from the operation's AMQP binding.
+- Override them per call with `WithContentType(string)`, `WithContentEncoding(string)`, `WithMessageType(string)`, `WithPriority(uint8)` and `WithExpirationMillis(int)`. Later options win.
+
+## Subscriber
+
+```go
+type SubscribeTransport interface {
+    Subscribe(ctx context.Context, queueName string, bindingKeys []string,
+        handler func(ctx context.Context, routingKey string, body []byte) error) error
+}
+
+type OrderMessageHandler interface {
+    HandleOrderMessage(ctx context.Context, msg OrderMessage) error
+}
+
+sub := NewSubscriber(transport)
+err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is done
+```
+
+- There is one `<Msg>Handler` interface and one `Subscribe<Msg>` method per `action: receive` operation, named after the message type.
+- The queue name comes from `bindings.amqp.queue.name`, then `bindings.x-aapi-codegen.queue.name`, then the channel address when the channel has `is: queue`. A receive operation needs one of these.
+- The binding key is always the channel address, so the queue's name can differ from its routing key.
+- Your transport maps the handler's result to AMQP:
+  - `nil` → ack;
+  - an error that matches `errors.Is(err, ErrDrop)` → nack without requeue (a poison message);
+  - any other error → nack with requeue.
+
+  A body that fails to decode is joined with `ErrDrop`, so a malformed message never loops.
+- **Shared queues.** When several receive operations resolve to the same queue, you get one `Subscribe<Queue>` method. Its `<Queue>Handler` interface embeds each message's handler. It binds every operation's routing key and dispatches each delivery by routing key. The operations must share an exchange and use fixed addresses with distinct routing keys.
+- Queue properties (`durable`, `autoDelete`, `exclusive`) are read but not used. Generated code doesn't declare queues or exchanges; your transport or your infrastructure owns the topology.
 
 ## Validation
 
-By default, aapi-codegen emits `UnmarshalJSON` methods that enforce the JSON Schema constraints in the spec: `required` fields, `additionalProperties: false`, `format` keywords (uuid, email, uri, hostname, regex), `enum`, numeric and string bounds, etc. Invalid JSON is rejected at `json.Unmarshal` time with an error naming the violation.
+By default, the generated `UnmarshalJSON` methods enforce the schema:
 
-Opt out per-spec when you need to hand-write your own `UnmarshalJSON` (e.g. to accept a legacy PascalCase wire format alongside the canonical camelCase — two `UnmarshalJSON` methods on the same type would be a compile error):
+- `required` fields and `additionalProperties: false`;
+- `enum`, numeric and string bounds, `pattern`, and array constraints;
+- the formats `uuid`, `email`, `uri`, `uri-reference`, `hostname` and `regex`.
+
+Invalid JSON fails at `json.Unmarshal` with an error that names the violation.
+
+Some formats change the Go type instead:
+
+- `date-time` → `time.Time`;
+- `date` and `time` → `types.SerializableDate` and `types.SerializableTime` from `github.com/plheide/go-jsonschema/pkg/types`. That package then becomes a dependency of your module.
+
+To write your own `UnmarshalJSON`, opt out. You might do this to accept a legacy wire format alongside the canonical one; two `UnmarshalJSON` methods on one type would not compile.
 
 ```yaml
-# inside the spec
 x-aapi-codegen:
   omit-validation: true
 ```
 
-Or via the optional config file:
+The same key works in the `-config` file.
 
-```yaml
-# aapi-codegen.config.yaml
-omit-validation: true
-```
+## Examples
 
-Either source opts out; neither overrides the other's opt-out.
+Worked specs and assertions live under [`internal/test/`](internal/test/):
 
-## Build / development
+| Fixture | Exercises |
+| --- | --- |
+| [`widgetservice/`](internal/test/widgetservice/) | direct exchange, templated and literal addresses, cross-tree `schema-packages` import |
+| [`notificationservice/`](internal/test/notificationservice/) | topic exchange, single-parameter address |
+| [`inlineservice/`](internal/test/inlineservice/) | inline payloads and `components.schemas` |
+| [`sharedmsgservice/`](internal/test/sharedmsgservice/) | `components.messages` referenced from several channels |
+| [`messagecollisionservice/`](internal/test/messagecollisionservice/) | inline and component message keys that collide |
+| [`validationservice/`](internal/test/validationservice/) | the `omit-validation` opt-out |
+| [`consumerservice/`](internal/test/consumerservice/) | `action: receive`, `<Msg>Handler`, `Subscribe<Msg>`, `ErrDrop`, queue-mode channels |
+| [`bindingsservice/`](internal/test/bindingsservice/) | `SendOption`, message and operation AMQP bindings |
+| [`enumparams/`](internal/test/enumparams/) | enum-typed channel parameters, shared by publisher and subscriber |
+| [`validatedparams/`](internal/test/validatedparams/) | pattern-typed parameters with `NewX` / `MustX`; `omit-validation` falls back to `string` |
+| [`consumerimportservice/`](internal/test/consumerimportservice/) | a consumer importing its producer's message type through `message-packages` |
+| [`sharedqueueservice/`](internal/test/sharedqueueservice/) | a routing-key consumer whose queue name differs from the channel address |
+| [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
+
+## Feature coverage
+
+### AsyncAPI 3.x ([spec](https://www.asyncapi.com/docs/reference/specification/v3.1.0))
+
+- [x] `asyncapi: 3.x` version detection
+- [x] `info.title` (used in the generated doc comments)
+- [x] `channels`
+  - [x] `address`: literal (`widget.cancellation`) or templated (`{tenant}.{widgetType}`)
+  - [x] `parameters`: `string` by default, typed from `schema.type: string` with `enum` or `pattern`
+  - [x] `messages`, including several per channel
+  - [x] `bindings.amqp`
+- [x] `operations`
+  - [x] `action: send` → a `Publisher` method named after the operation key
+  - [x] `action: receive` → `<Msg>Handler` and `Subscriber.Subscribe<Msg>`, or a shared-queue `Subscribe<Queue>`
+  - [x] `channel.$ref` and `messages[].$ref` (exactly one message per operation)
+- [x] `components.schemas` and `components.messages`
+- [x] `messages.X.payload` inline or as a `$ref` to an external JSON Schema file
+- [x] Cross-file message `$ref` with `message-packages`
+- [ ] `oneOf` payloads: go-jsonschema generates the types, but there is no per-variant `Send` method
+
+### AMQP binding ([spec](https://github.com/asyncapi/bindings/tree/master/amqp))
+
+- [x] `exchange.name`: the exchange the publisher sends to
+- [x] `exchange.type` (`direct`, `topic`, `fanout`, `headers`): used in doc comments only
+- [x] `is: routingKey` and `is: queue`
+- [x] `queue.{name, durable, autoDelete, exclusive}`: the name is used; the rest is read but not used
+- [x] Message bindings: `contentEncoding`, `messageType`
+- [x] Operation bindings: `priority`, `expiration`
+- [ ] Delivery metadata (headers, correlation ID, reply-to) passed to handlers
+
+### Other protocol bindings
+
+- [ ] Kafka
+- [ ] WebSocket
+- [ ] HTTP / SSE
+- [ ] AMQP 1.0
+
+## Limitations
+
+- **AMQP 0.9.1 only.** Every channel needs `bindings.amqp`.
+- **One message per operation.**
+- **Same message in two receive operations.** Receiving the same message type in more than one operation currently generates code that doesn't compile. The generator doesn't report it; a fix is planned.
+- **Shared-queue subscribers** need one exchange and fixed, distinct routing keys.
+- **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
+- **No topology.** Generated code doesn't declare queues or exchanges.
+- **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
+- **Imported type names.** An imported message's Go type name is the producer's message key; see [Consuming another service's messages](#consuming-another-services-messages).
+
+## Development
 
 Requires Go 1.26+. The `go.mod` directive sets the floor; CI tracks the version pinned in [`.github/versions.env`](.github/versions.env).
 
@@ -100,112 +294,22 @@ go test ./...
 
 The build is a single Go binary. The JSON Schema pass comes from the [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema) fork, pinned in [go.mod](go.mod) like any other dependency; a plain clone builds.
 
-PRs run `go mod tidy -diff`, `go vet`, `go test -race`, `golangci-lint`, and a goreleaser snapshot build via [`.github/workflows/development.yaml`](.github/workflows/development.yaml). Tag pushes (`vX.Y.Z` and `vX.Y.Z-rc.N`) trigger the release workflow.
+PRs run `go mod tidy -diff`, `go vet`, `go test -race`, `golangci-lint`, and a goreleaser snapshot build via [`.github/workflows/development.yaml`](.github/workflows/development.yaml).
 
-Install a released version with `go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@VERSION` (v0.8.0 and later), or download a release archive. To pin the version per consuming repo, see [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh) — a download-and-cache script modelled on `plheide/go-jsonschema`'s `use-go-jsonschema.sh`. Supports Linux, macOS, and Windows (via Git Bash / WSL).
+To release, push a `vX.Y.Z` or `vX.Y.Z-rc.N` tag; the release workflow builds the archives with goreleaser. In the change before the tag, bump the default `AAPI_VERSION` in [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh).
 
-### Examples
+## JSON Schema support
 
-Worked specs and assertions live under [`internal/test/`](internal/test/):
+The JSON Schema → Go pass is [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema), a fork of [omissis/go-jsonschema](https://github.com/omissis/go-jsonschema), called as a library. aapi-codegen configures it to:
 
-| Fixture | Exercises |
-| --- | --- |
-| [`widgetservice/`](internal/test/widgetservice/) | direct exchange, templated and literal addresses, cross-tree `x-aapi-codegen.schema-packages` import |
-| [`notificationservice/`](internal/test/notificationservice/) | topic exchange, single-parameter address |
-| [`inlineservice/`](internal/test/inlineservice/) | inline payloads + `components.schemas` |
-| [`sharedmsgservice/`](internal/test/sharedmsgservice/) | `components.messages` referenced from multiple channels |
-| [`messagecollisionservice/`](internal/test/messagecollisionservice/) | regression for inline + component-message keys colliding |
-| [`validationservice/`](internal/test/validationservice/) | `omit-validation` opt-out |
-| [`consumerservice/`](internal/test/consumerservice/) | **v0.2** — `action: receive`, `<Msg>Handler` interface, `Subscribe<Msg>`, `ErrDrop` semantics, queue-mode channels |
-| [`bindingsservice/`](internal/test/bindingsservice/) | **v0.3** — `SendOption` + message/operation AMQP bindings (priority, expiration, contentEncoding, messageType) |
-| [`enumparams/`](internal/test/enumparams/) | **v0.4** — typed channel parameters from `schema.type: string + enum`, dedup across publisher + subscriber |
-| [`validatedparams/`](internal/test/validatedparams/) | **v0.4.1** — pattern-validated parameters with `NewX`/`MustX` constructors; `omit-validation` falls back to plain `string` |
-| [`sharedqueueservice/`](internal/test/sharedqueueservice/) | **v0.6** — routingKey-mode consumer whose `x-aapi-codegen.queue.name` differs from the channel address; Subscribe passes queue name + binding keys separately |
-| [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | **v0.7** — several receive ops sharing one queue (distinct fixed routing keys, distinct message types); one combined `Subscribe<Queue>` binds all keys and dispatches by routing key |
+- name structs after their `title`;
+- respect `additionalProperties` as the schema declares it;
+- validate formats;
+- emit `json` tags;
+- apply the configured initialisms.
 
-## Status
+See the fork's README for the supported JSON Schema features, such as `$defs`, cross-file `$ref`, `oneOf` / `allOf` / `anyOf` and `enum`.
 
-aapi-codegen covers both publisher and subscriber AMQP code generation from AsyncAPI 3.x specs. Other protocol bindings (Kafka, WebSocket) are the main open scope.
+## License
 
-### AsyncAPI 3.x ([spec](https://www.asyncapi.com/docs/reference/specification/v3.1.0))
-
-- [x] `asyncapi: 3.x` version detection
-- [x] `info.title` (used in generated publisher/subscriber doc comment)
-- [x] `channels`
-  - [x] `address` — literal (e.g. `widget.cancellation`)
-  - [x] `address` — templated, multi-parameter (e.g. `{tenant}.{widgetType}`)
-  - [x] `address` — templated, single-parameter (e.g. `{workflowName}`)
-  - [x] `parameters` — `string` by default; **v0.4** types from `schema.type: string + enum`; **v0.4.1** types from `schema.type: string + pattern` with `NewX`/`MustX` constructors
-  - [x] `messages` — multi-message channels
-  - [x] `bindings.amqp` — typed per channel
-- [x] `operations`
-  - [x] `action: send` — emits typed `Publisher.Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` methods
-  - [x] `action: receive` — emits `<MessageName>Handler` interface + `Subscriber.Subscribe<MessageName>(ctx, ...params, handler) error` (**v0.2**)
-  - [x] `operations.X.channel.$ref` — internal ref resolution
-  - [x] `operations.X.messages[].$ref` — internal ref resolution (exactly one message per operation)
-- [x] `components.schemas` — shared types declared once, referenced from multiple payloads via `#/components/schemas/X`
-- [x] `components.messages` — message-wrapper reuse via `#/components/messages/X`. Shared wrappers produce one Go payload type, not one per reference. Operation-level refs may target either `#/channels/.../messages/Y` (channel-scoped) or `#/components/messages/Y` (component-scoped).
-- [x] `messages.X.payload` via `$ref` to external JSON Schema file
-- [x] `messages.X.payload` inline (Go type name defaults to message key; inline `title` overrides)
-- [x] Spec extension `x-aapi-codegen.schema-packages` — cross-tree `$ref` → Go-import mapping
-- [x] Spec extension `x-aapi-codegen.omit-publishers` / `omit-subscribers` (**v0.2**) — opt out of either generated section even when the spec has matching operations
-- [ ] `oneOf` payload dispatch (typed `Send` method per discriminated variant) — IR has the placeholder; templates pending
-
-### AMQP binding ([spec](https://github.com/asyncapi/bindings/tree/master/amqp))
-
-- [x] `exchange.name` — emitted as a string literal in the publisher body
-- [x] `exchange.type: direct`, `topic`, `fanout`, `headers`
-- [x] `bindingVersion` — preserved in IR for future use
-- [x] `is: routingKey` — address is the routing key on Exchange (publisher mode)
-- [x] `is: queue` (**v0.2**) — address is the queue name; subscriber emits `Subscribe<Msg>` against `bindings.amqp.queue.{name, durable, autoDelete, exclusive}`
-- [x] Message-level bindings (**v0.3**): `contentEncoding`, `messageType`
-- [x] Operation-level bindings (**v0.3**): `priority`, `expiration`
-- [ ] AMQP delivery headers / correlation-id / reply-id surfaced to receive handlers — subscriber currently passes only `(ctx, routingKey, body)` to the dispatch wrapper
-
-### Generated runtime contracts (**v0.2+**, **v0.3+**)
-
-- **Publisher** ([example](internal/test/widgetservice/publisher_assertions.txt)):
-  - `Transport.Publish(ctx, exchange, routingKey string, body []byte, props PublishProperties) error` — adapt your `*amqp091.Channel` by wrapping it.
-  - `Send<MessageName>(ctx, ...params, msg, opts ...SendOption) error` — spec bindings become defaults; opts override per call.
-  - Helpers: `WithContentType`, `WithContentEncoding`, `WithMessageType`, `WithPriority`, `WithExpirationMillis`.
-- **Subscriber** ([example](internal/test/consumerservice/consumer_assertions.txt)):
-  - `SubscribeTransport.Subscribe(ctx, queueName string, bindingKeys []string, handler func(ctx, routingKey, body) error) error` (**v0.6**) — blocks until ctx cancellation or fatal transport error. `queueName` comes from `bindings.{amqp,x-aapi-codegen}.queue.name` (falling back to the address); `bindingKeys` always derive from the channel address, so a shared queue bound to a fixed routing key (queue ≠ key) is expressible.
-  - `<MessageName>Handler.Handle<MessageName>(ctx, msg) error` — implement on your consumer.
-  - **Ack semantics**: `nil` → ack; `errors.Is(err, ErrDrop)` → nack-no-requeue (poison); any other err → nack-with-requeue. The dispatch wrapper joins `json.Unmarshal` failures with `ErrDrop` so malformed payloads can never loop forever.
-
-### Other protocol bindings
-
-- [ ] Kafka
-- [ ] WebSocket
-- [ ] HTTP / SSE
-- [ ] AMQP 1.0 (Solace, Azure Service Bus, …)
-
-The IR's `Binding` interface is binding-agnostic; adding a new binding is "add a typed struct + a template branch", no IR refactor needed.
-
-### JSON Schema support (inherited from go-jsonschema)
-
-aapi-codegen delegates the JSON Schema → Go pass to [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema) (a patched fork of [omissis/go-jsonschema](https://github.com/omissis/go-jsonschema)). aapi-codegen passes `--strict-additional-properties=respect-schema`, `--validate-formats=all`, `--struct-name-from-title`, `--tags json`, and `--capitalization` per the configured initialism list. See the fork's README for the supported JSON Schema surface (object/array/primitives, `$defs`, cross-file `$ref`, `oneOf`/`allOf`/`anyOf`, enum, format validation, etc.).
-
-### Validation features
-
-- [x] `required` fields enforced at `json.Unmarshal` time (default; opt-out via `omit-validation`)
-- [x] `additionalProperties: false` enforced (rejects extra keys)
-- [x] `format` validation: `uuid`, `email`, `uri`, `uri-reference`, `hostname`, `regex`
-- [x] `enum`, numeric bounds, string length/pattern, array constraints (inherited from go-jsonschema)
-- [x] Per-spec / per-config opt-out via `x-aapi-codegen.omit-validation: true` (or `omit-validation: true` in `aapi-codegen.config.yaml`) — for consumers that hand-write their own `UnmarshalJSON`
-
-### CLI / configuration
-
-- [x] Minimal invocation: `aapi-codegen SPEC.asyncapi.yaml`
-- [x] `-o OUT.go` (defaults to `./types.gen.go`)
-- [x] `-package PKG` (defaults: basename of output dir, with `vN` parent-prepending rule)
-- [x] `-config FILE.yaml` (optional; for repos that want one canonical knob)
-- [x] Additive `capitalization` over `DefaultInitialisms = [ID, URL]`
-- [x] `omit-validation: true` (config or spec extension) suppresses generated `UnmarshalJSON`
-
-### Distribution
-
-- [x] `go build ./cmd/aapi-codegen` from a plain clone
-- [x] GoReleaser config + GitHub Actions workflow for release archives ([`.goreleaser.yaml`](.goreleaser.yaml), [`.github/workflows/release.yaml`](.github/workflows/release.yaml))
-- [x] Download-and-cache consumer script ([`examples/use-aapi-codegen.sh`](examples/use-aapi-codegen.sh))
-- [x] `go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@VERSION` (v0.8.0 and later; the module has no `replace` directives)
+MIT; see [LICENSE](LICENSE).
