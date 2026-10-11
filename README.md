@@ -278,7 +278,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 
 - **AMQP 0.9.1 only.** Every channel needs `bindings.amqp`.
 - **One message per operation.**
-- **Same message from two queues.** Receiving one message type from two separate queues isn't supported, because both operations would need the same `Subscribe<Msg>` method; the generator stops with an error. Bind the routing keys to one shared queue instead.
+- **Same message on two single-operation queues.** If two queues each have one receive operation and both carry the same message type, both would need the same `Subscribe<Msg>` method, so the generator stops with an error. Bind the routing keys to one shared queue instead. A shared queue gets its own `Subscribe<Queue>` method, so it can sit alongside another queue for the same type.
 - **Name collisions.** If two spec elements would generate the same Go name, such as a payload titled `Subscriber`, the generator stops with an error instead of writing code that doesn't compile.
 - **Shared-queue subscribers** need one exchange and fixed, distinct routing keys.
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
