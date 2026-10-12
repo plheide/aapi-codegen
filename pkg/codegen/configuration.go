@@ -101,4 +101,3 @@ func (c *Configuration) ToCodegenConfig() Config {
 		OmitValidation:  c.OmitValidation,
 	}
 }
-

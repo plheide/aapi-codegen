@@ -34,7 +34,7 @@ func runJSONSchemaInProcess(pkg string, initialisms []string, output string, sch
 		Tags:                       []string{"json"},
 		StrictAdditionalProperties: generator.StrictAdditionalPropertiesRespectSchema,
 		FormatValidation:           generator.FormatValidationConfig{Enabled: true}, // nil AllowList = all formats
-		Warner:                     func(string) {},                                  // discard warnings — surface via Sources() if needed later
+		Warner:                     func(string) {},                                 // discard warnings — surface via Sources() if needed later
 	}
 	for i, sp := range schemaPackages {
 		cfg.SchemaMappings = append(cfg.SchemaMappings, generator.SchemaMapping{
