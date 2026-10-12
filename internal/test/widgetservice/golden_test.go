@@ -233,4 +233,3 @@ func runGo(t *testing.T, dir string, args []string) {
 		t.Logf("go %s output:\n%s", strings.Join(args, " "), out)
 	}
 }
-

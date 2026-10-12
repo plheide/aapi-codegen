@@ -111,12 +111,12 @@ type Info struct {
 }
 
 type Channel struct {
-	Address     string                 `yaml:"address"`
-	Title       string                 `yaml:"title,omitempty"`
-	Description string                 `yaml:"description,omitempty"`
-	Parameters  map[string]*Parameter  `yaml:"parameters,omitempty"`
-	Bindings    map[string]any `yaml:"bindings,omitempty"`
-	Messages    map[string]*Message    `yaml:"messages,omitempty"`
+	Address     string                `yaml:"address"`
+	Title       string                `yaml:"title,omitempty"`
+	Description string                `yaml:"description,omitempty"`
+	Parameters  map[string]*Parameter `yaml:"parameters,omitempty"`
+	Bindings    map[string]any        `yaml:"bindings,omitempty"`
+	Messages    map[string]*Message   `yaml:"messages,omitempty"`
 }
 
 type Parameter struct {
@@ -136,12 +136,12 @@ type Message struct {
 	// component's fields into this struct, and sets CanonicalName.
 	// Spec authors can't mix Ref with inline fields — the resolver
 	// rejects that.
-	Ref         string         `yaml:"$ref,omitempty"`
-	Name        string         `yaml:"name,omitempty"`
-	Title       string         `yaml:"title,omitempty"`
-	Summary     string         `yaml:"summary,omitempty"`
-	ContentType string         `yaml:"contentType,omitempty"`
-	Payload     Payload        `yaml:"payload"`
+	Ref         string  `yaml:"$ref,omitempty"`
+	Name        string  `yaml:"name,omitempty"`
+	Title       string  `yaml:"title,omitempty"`
+	Summary     string  `yaml:"summary,omitempty"`
+	ContentType string  `yaml:"contentType,omitempty"`
+	Payload     Payload `yaml:"payload"`
 	// Bindings is the raw `messages.X.bindings` map, surfaced to the
 	// lowerer which extracts message-level AMQP fields (contentEncoding,
 	// messageType) for publisher property defaults. v0.3+.

@@ -31,3 +31,9 @@ linters:
       # in the `standard` preset or the additions above, so the rule
       # was dead. If gochecknoglobals ever gets enabled, restore an
       # exclusion for cmd/*.go — flag.* uses top-level globals there.)
+
+# Formatters are checked by `golangci-lint run` too, so unformatted code
+# fails CI instead of drifting. `golangci-lint fmt` applies them.
+formatters:
+  enable:
+    - gofmt
