@@ -1,0 +1,89 @@
+// Runtime assertions for receive operations that share a message type.
+// Dropped into the tmp module's sharedmsgqueuev1 package next to the
+// generated file.
+
+package sharedmsgqueuev1
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+type recordingTransport struct {
+	queue   string
+	keys    []string
+	handler func(ctx context.Context, routingKey string, body []byte) error
+}
+
+func (r *recordingTransport) Subscribe(_ context.Context, queueName string, bindingKeys []string,
+	handler func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue, r.keys, r.handler = queueName, bindingKeys, handler
+	return nil
+}
+
+type auditRecorder struct{ got []AuditEvent }
+
+func (a *auditRecorder) HandleAuditEvent(_ context.Context, msg AuditEvent) error {
+	a.got = append(a.got, msg)
+	return nil
+}
+
+// One consumer type serves both the shared queue and the archive queue.
+var (
+	_ AuditLogHandler   = (*auditRecorder)(nil)
+	_ AuditEventHandler = (*auditRecorder)(nil)
+)
+
+func TestSubscribeAuditLog_BothKeysReachOneHandler(t *testing.T) {
+	tr := &recordingTransport{}
+	rec := &auditRecorder{}
+	if err := NewSubscriber(tr).SubscribeAuditLog(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if tr.queue != "audit-log" {
+		t.Errorf("queue = %q, want audit-log", tr.queue)
+	}
+	if len(tr.keys) != 2 || tr.keys[0] != "orders.cancelled" || tr.keys[1] != "orders.created" {
+		t.Errorf("binding keys = %v, want [orders.cancelled orders.created]", tr.keys)
+	}
+	for _, key := range []string{"orders.created", "orders.cancelled"} {
+		body := []byte(`{"id":"` + key + `","action":"audit"}`)
+		if err := tr.handler(context.Background(), key, body); err != nil {
+			t.Fatalf("deliver on %s: %v", key, err)
+		}
+	}
+	if len(rec.got) != 2 || rec.got[0].ID != "orders.created" || rec.got[1].ID != "orders.cancelled" {
+		t.Errorf("handler got %+v, want one event per key in delivery order", rec.got)
+	}
+}
+
+func TestSubscribeAuditLog_UnknownKeyAndBadBodyAreDropped(t *testing.T) {
+	tr := &recordingTransport{}
+	if err := NewSubscriber(tr).SubscribeAuditLog(context.Background(), &auditRecorder{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.handler(context.Background(), "orders.deleted", []byte(`{"id":"1","action":"audit"}`)); !errors.Is(err, ErrDrop) {
+		t.Errorf("unknown routing key: err = %v, want ErrDrop", err)
+	}
+	if err := tr.handler(context.Background(), "orders.created", []byte(`not json`)); !errors.Is(err, ErrDrop) {
+		t.Errorf("malformed body: err = %v, want ErrDrop", err)
+	}
+}
+
+func TestSubscribeAuditEvent_ArchiveQueue(t *testing.T) {
+	tr := &recordingTransport{}
+	rec := &auditRecorder{}
+	if err := NewSubscriber(tr).SubscribeAuditEvent(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+	if tr.queue != "audit-archive" || len(tr.keys) != 1 || tr.keys[0] != "orders.archived" {
+		t.Errorf("queue = %q, keys = %v; want audit-archive bound to orders.archived", tr.queue, tr.keys)
+	}
+	if err := tr.handler(context.Background(), "orders.archived", []byte(`{"id":"a1","action":"archive"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.got) != 1 || rec.got[0].ID != "a1" {
+		t.Errorf("handler got %+v, want the archived event", rec.got)
+	}
+}

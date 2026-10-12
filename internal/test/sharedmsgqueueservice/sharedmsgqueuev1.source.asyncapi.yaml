@@ -1,0 +1,77 @@
+asyncapi: 3.1.0
+info:
+  title: SharedMsgQueueService — one message type on several routing keys
+  version: 1.0.0
+  description: |
+    Fixture for receive operations that share a message type. Two routing
+    keys bound to one shared queue (audit-log) carry the same AuditEvent,
+    and a third channel delivers AuditEvent from its own queue
+    (audit-archive). The generator must declare AuditEventHandler once,
+    dispatch both shared-queue keys through one switch case, and keep the
+    single-queue Subscribe for the archive queue.
+
+defaultContentType: application/json
+
+components:
+  messages:
+    AuditEvent:
+      payload:
+        title: AuditEvent
+        type: object
+        required: [id, action]
+        additionalProperties: false
+        properties:
+          id: { type: string }
+          action: { type: string }
+
+channels:
+  ordersCreated:
+    address: orders.created
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: topic }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: audit-log, durable: true }
+    messages:
+      AuditEvent: { $ref: '#/components/messages/AuditEvent' }
+  ordersCancelled:
+    address: orders.cancelled
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: topic }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: audit-log, durable: true }
+    messages:
+      AuditEvent: { $ref: '#/components/messages/AuditEvent' }
+  ordersArchived:
+    address: orders.archived
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: topic }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: audit-archive, durable: true }
+    messages:
+      AuditEvent: { $ref: '#/components/messages/AuditEvent' }
+
+operations:
+  auditCreated:
+    action: receive
+    channel: { $ref: '#/channels/ordersCreated' }
+    messages:
+      - $ref: '#/channels/ordersCreated/messages/AuditEvent'
+  auditCancelled:
+    action: receive
+    channel: { $ref: '#/channels/ordersCancelled' }
+    messages:
+      - $ref: '#/channels/ordersCancelled/messages/AuditEvent'
+  archiveOrders:
+    action: receive
+    channel: { $ref: '#/channels/ordersArchived' }
+    messages:
+      - $ref: '#/channels/ordersArchived/messages/AuditEvent'

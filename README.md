@@ -189,7 +189,7 @@ err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is do
   - any other error → nack with requeue.
 
   A body that fails to decode is joined with `ErrDrop`, so a malformed message never loops.
-- **Shared queues.** When several receive operations resolve to the same queue, you get one `Subscribe<Queue>` method. Its `<Queue>Handler` interface embeds each message's handler. It binds every operation's routing key and dispatches each delivery by routing key. The operations must share an exchange and use fixed addresses with distinct routing keys.
+- **Shared queues.** When several receive operations resolve to the same queue, you get one `Subscribe<Queue>` method. Its `<Queue>Handler` interface embeds each message type's handler once. It binds every operation's routing key and dispatches each delivery by routing key; keys that carry the same message type go to the same handler method. The operations must share an exchange and use fixed addresses with distinct routing keys.
 - Queue properties (`durable`, `autoDelete`, `exclusive`) are read but not used. Generated code doesn't declare queues or exchanges; your transport or your infrastructure owns the topology.
 
 ## Validation
@@ -235,6 +235,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`consumerimportservice/`](internal/test/consumerimportservice/) | a consumer importing its producer's message type through `message-packages` |
 | [`sharedqueueservice/`](internal/test/sharedqueueservice/) | a routing-key consumer whose queue name differs from the channel address |
 | [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
+| [`sharedmsgqueueservice/`](internal/test/sharedmsgqueueservice/) | one message type on two routing keys of a shared queue, and on a queue of its own |
 
 ## Feature coverage
 
@@ -277,7 +278,8 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 
 - **AMQP 0.9.1 only.** Every channel needs `bindings.amqp`.
 - **One message per operation.**
-- **Same message in two receive operations.** Receiving the same message type in more than one operation currently generates code that doesn't compile. The generator doesn't report it; a fix is planned.
+- **Same message on two single-operation queues.** If two queues each have one receive operation and both carry the same message type, both would need the same `Subscribe<Msg>` method, so the generator stops with an error. Bind the routing keys to one shared queue instead. A shared queue gets its own `Subscribe<Queue>` method, so it can sit alongside another queue for the same type.
+- **Name collisions.** If two spec elements would generate the same Go name, such as a payload titled `Subscriber`, the generator stops with an error instead of writing code that doesn't compile.
 - **Shared-queue subscribers** need one exchange and fixed, distinct routing keys.
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.

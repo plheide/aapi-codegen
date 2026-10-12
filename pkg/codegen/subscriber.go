@@ -15,11 +15,15 @@ import (
 //   - one <MessageName>Handler interface + one Subscribe<MessageName>
 //     method per receive op whose queue carries a single message type
 //     (.Operations), OR
-//   - for a queue shared by several receive ops (several message types,
-//     one per routing key — v0.7), one <MessageName>Handler interface
-//     per message, one combined <QueueName>Handler interface embedding
-//     them, and one Subscribe<QueueName> method that binds all keys and
-//     dispatches by routing key (.MultiGroups).
+//   - for a queue shared by several receive ops (v0.7), one
+//     <MessageName>Handler interface per message type, one combined
+//     <QueueName>Handler interface embedding them, and one
+//     Subscribe<QueueName> method that binds all keys and dispatches by
+//     routing key (.MultiGroups). Routing keys that carry the same
+//     message type share one switch case.
+//
+// Each <MessageName>Handler interface is declared once per file, at its
+// first use in render order, however many operations receive that type.
 //
 // Handler signature: HandleX(ctx, msg X) error. Ack semantics:
 //   - nil               → ack
@@ -73,6 +77,7 @@ func NewSubscriber(transport SubscribeTransport) *Subscriber {
 	return &Subscriber{transport: transport}
 }
 {{ range .Operations }}
+{{- if .EmitHandler }}
 // {{.HandlerTypeName}} consumes {{.Message.QualifiedGoType}} messages.
 // Implement on your consumer; the generated Subscribe wrapper takes care
 // of JSON-decoding the body and mapping handler errors to ack semantics
@@ -80,7 +85,7 @@ func NewSubscriber(transport SubscribeTransport) *Subscriber {
 type {{.HandlerTypeName}} interface {
 	{{.HandlerMethodName}}(ctx context.Context, msg {{.Message.QualifiedGoType}}) error
 }
-
+{{ end }}
 // {{.GoFuncName}} starts consuming {{.Message.QualifiedGoType}} messages from
 // the queue named "{{.Queue.NameExpr}}" (from bindings.amqp.queue.name),
 // bound with routing key "{{.Channel.Address.Raw}}" (the channel address).
@@ -107,9 +112,9 @@ func (s *Subscriber) {{.GoFuncName}}(
 }
 {{ end }}
 {{- range .MultiGroups }}
-{{- range .Messages }}
-// {{.HandlerTypeName}} consumes {{.QualifiedGoType}} messages (routing key
-// "{{.AddressRaw}}") delivered to the shared queue. Implement on your
+{{- range .HandlerDecls }}
+// {{.HandlerTypeName}} consumes {{.QualifiedGoType}} messages (routing {{.RoutingKeyWord}}
+// {{.RoutingKeysDoc}}) delivered to the shared queue. Implement on your
 // consumer; the generated dispatch decodes the body and maps handler
 // errors to ack semantics per ErrDrop.
 type {{.HandlerTypeName}} interface {
@@ -117,17 +122,16 @@ type {{.HandlerTypeName}} interface {
 }
 {{ end }}
 // {{.HandlerTypeName}} aggregates the per-message handlers for the shared
-// queue "{{.QueueNameExpr}}". The queue carries several message types (one
-// per binding key); {{.GoFuncName}} routes each delivery to the matching
+// queue "{{.QueueNameExpr}}". {{.CarriesDoc}}; {{.GoFuncName}} routes each delivery to the matching
 // method below by its routing key.
 type {{.HandlerTypeName}} interface {
-{{- range .Messages }}
-	{{.HandlerTypeName}}
+{{- range .Embeds }}
+	{{.}}
 {{- end }}
 }
 
 // {{.GoFuncName}} starts consuming the shared queue "{{.QueueNameExpr}}",
-// bound with one binding key per message type, and dispatches each delivery
+// {{.BoundDoc}}, and dispatches each delivery
 // by its routing key to the matching handler method. Blocks until ctx is
 // cancelled or a fatal transport error occurs.
 func (s *Subscriber) {{.GoFuncName}}(ctx context.Context, handler {{.HandlerTypeName}}) error {
@@ -135,8 +139,8 @@ func (s *Subscriber) {{.GoFuncName}}(ctx context.Context, handler {{.HandlerType
 	bindingKeys := []string{ {{.BindingKeysExprGo}} }
 	return s.transport.Subscribe(ctx, queueName, bindingKeys, func(ctx context.Context, routingKey string, body []byte) error {
 		switch routingKey {
-{{- range .Messages }}
-		case {{.AddressLiteralGo}}:
+{{- range .Cases }}
+		case {{.KeysGo}}:
 			var msg {{.QualifiedGoType}}
 			if err := json.Unmarshal(body, &msg); err != nil {
 				return fmt.Errorf("decode {{.QualifiedGoType}} (dropping): %w", errors.Join(ErrDrop, err))
@@ -174,6 +178,9 @@ type subscriberOpView struct {
 	// (Address.RoutingKeyExpr), independent of the queue name. Equal to
 	// Queue.NameExprGo for queue-mode channels where address == queue.
 	BindingKeysExprGo string
+	// EmitHandler is true when this operation declares its handler
+	// interface: the first use of the interface in render order.
+	EmitHandler bool
 }
 
 type subscriberQueueView struct {
@@ -203,24 +210,59 @@ type subscriberGroupView struct {
 	QueueNameExpr   string
 	QueueNameExprGo string
 	// BindingKeysExprGo is the comma-joined Go expression listing every
-	// message's binding key (each channel's address routing-key literal).
+	// operation's binding key (each channel's address routing-key literal),
+	// in operation (alphabetical) order.
 	BindingKeysExprGo string
-	// Messages is the per-message dispatch set, in operation (alphabetical)
-	// order.
-	Messages []subscriberGroupMsgView
+	// CarriesDoc and BoundDoc are the doc-comment phrases that change when
+	// a message type arrives on more than one of the queue's routing keys.
+	CarriesDoc string
+	BoundDoc   string
+	// HandlerDecls are the per-message handler interfaces this group
+	// declares: one per distinct message type, minus any already declared
+	// earlier in render order.
+	HandlerDecls []groupHandlerDecl
+	// Embeds are the distinct per-message handler interfaces the combined
+	// <Queue>Handler embeds, in first-seen order.
+	Embeds []string
+	// Cases are the routing-key switch cases: one per distinct message
+	// type, listing every routing key that carries it.
+	Cases []groupCase
 }
 
-type subscriberGroupMsgView struct {
+// groupHandlerDecl is one per-message handler interface a shared-queue
+// group declares.
+type groupHandlerDecl struct {
+	// OpName is the first operation in the group that receives this
+	// message type; error messages name it.
+	OpName            string
 	HandlerTypeName   string
 	HandlerMethodName string
 	QualifiedGoType   string
-	// AddressRaw is the channel address (routing key) for the comment.
-	AddressRaw string
-	// AddressLiteralGo is the quoted Go string literal for the routing-key
-	// switch case (fixed addresses only — multi-message grouping requires
-	// fixed routing keys).
-	AddressLiteralGo string
+	// RoutingKeyWord is "key" or "keys"; RoutingKeysDoc lists the quoted
+	// routing keys that carry this type, for the doc comment.
+	RoutingKeyWord string
+	RoutingKeysDoc string
 }
+
+// groupCase is one case of a shared-queue subscriber's routing-key switch.
+type groupCase struct {
+	// KeysGo is the comma-joined quoted Go literals of every routing key
+	// that carries this message type (fixed addresses only — multi-message
+	// grouping requires fixed routing keys).
+	KeysGo            string
+	QualifiedGoType   string
+	HandlerMethodName string
+}
+
+// Doc-comment phrases for a shared-queue group. The "distinct" pair keeps
+// the v0.7 wording, so groups whose routing keys each carry a different
+// message type generate byte-for-byte as before.
+const (
+	carriesDocDistinct = "The queue carries several message types (one\n// per binding key)"
+	carriesDocShared   = "The queue is bound to several routing keys, some\n// carrying the same message type"
+	boundDocDistinct   = "bound with one binding key per message type"
+	boundDocShared     = "bound with each operation's routing key"
+)
 
 // opEntry is one lowered receive operation plus the bits buildSubscriberGroup
 // needs to decide single-vs-shared-queue rendering.
@@ -304,6 +346,9 @@ func RenderSubscriber(spec *ir.Spec) (string, error) {
 		}
 		view.MultiGroups = append(view.MultiGroups, gv)
 	}
+	if err := assignHandlerDecls(&view); err != nil {
+		return "", err
+	}
 
 	if len(view.Operations) == 0 && len(view.MultiGroups) == 0 {
 		return "", nil
@@ -317,6 +362,50 @@ func RenderSubscriber(spec *ir.Spec) (string, error) {
 		return "", fmt.Errorf("execute subscriber template: %w", err)
 	}
 	return b.String(), nil
+}
+
+// assignHandlerDecls makes each <MessageName>Handler interface appear once
+// per file: at its first use in render order (single-queue operations,
+// then shared-queue groups), however many operations receive that message
+// type. It rejects the specs that would otherwise generate Go that doesn't
+// compile:
+//   - two operations whose message types differ but map to the same
+//     handler name (e.g. one type name imported from two packages);
+//   - two single-queue operations on the same message type, which would
+//     both need Subscribe<MessageName>.
+func assignHandlerDecls(view *subscriberView) error {
+	type origin struct{ op, goType string }
+	declared := make(map[string]origin)
+	byFunc := make(map[string]subscriberOpView)
+	for i := range view.Operations {
+		o := &view.Operations[i]
+		goType := o.Message.QualifiedGoType()
+		if prev, ok := declared[o.HandlerTypeName]; ok && prev.goType != goType {
+			return sameHandlerNameError(o.HandlerTypeName, prev.op, prev.goType, o.Name, goType)
+		}
+		if prev, ok := byFunc[o.GoFuncName]; ok {
+			return fmt.Errorf("operations %q and %q both receive %s from separate queues (%q and %q), so both would need %s; bind their routing keys to one shared queue (the same bindings.amqp.queue.name or bindings.x-aapi-codegen.queue.name) to get one combined subscriber", prev.Name, o.Name, goType, prev.Queue.NameExpr, o.Queue.NameExpr, o.GoFuncName)
+		}
+		byFunc[o.GoFuncName] = *o
+		declared[o.HandlerTypeName] = origin{op: o.Name, goType: goType}
+		o.EmitHandler = true
+	}
+	for gi := range view.MultiGroups {
+		g := &view.MultiGroups[gi]
+		kept := g.HandlerDecls[:0]
+		for _, d := range g.HandlerDecls {
+			if prev, ok := declared[d.HandlerTypeName]; ok {
+				if prev.goType != d.QualifiedGoType {
+					return sameHandlerNameError(d.HandlerTypeName, prev.op, prev.goType, d.OpName, d.QualifiedGoType)
+				}
+				continue // declared earlier in the file
+			}
+			declared[d.HandlerTypeName] = origin{op: d.OpName, goType: d.QualifiedGoType}
+			kept = append(kept, d)
+		}
+		g.HandlerDecls = kept
+	}
+	return nil
 }
 
 // buildSubscriberGroup assembles the combined-Subscriber view for a queue
@@ -339,6 +428,15 @@ func buildSubscriberGroup(queue string, group []opEntry) (subscriberGroupView, e
 	exchange := group[0].exchange
 	seenAddr := make(map[string]struct{}, len(group))
 	keys := make([]string, 0, len(group))
+	// One slot per distinct message type (keyed by handler name), in
+	// first-seen order, collecting every routing key that carries it.
+	type typeSlot struct {
+		decl groupHandlerDecl
+		raw  []string // addresses, for the doc comment
+		lits []string // quoted literals, for the switch case
+	}
+	var slots []*typeSlot
+	byHandler := make(map[string]*typeSlot, len(group))
 	for _, e := range group {
 		if e.exchange != exchange {
 			return subscriberGroupView{}, fmt.Errorf("shared queue %q is bound on two exchanges (%q vs %q); a combined subscriber needs one exchange", queue, exchange, e.exchange)
@@ -355,16 +453,59 @@ func buildSubscriberGroup(queue string, group []opEntry) (subscriberGroupView, e
 		}
 		seenAddr[addrLiteral] = struct{}{}
 		keys = append(keys, addrLiteral)
-		gv.Messages = append(gv.Messages, subscriberGroupMsgView{
-			HandlerTypeName:   e.op.HandlerTypeName,
-			HandlerMethodName: e.op.HandlerMethodName,
-			QualifiedGoType:   e.op.Message.QualifiedGoType(),
-			AddressRaw:        e.op.Channel.Address.Raw,
-			AddressLiteralGo:  addrLiteral,
-		})
+
+		goType := e.op.Message.QualifiedGoType()
+		if s, ok := byHandler[e.op.HandlerTypeName]; ok {
+			if s.decl.QualifiedGoType != goType {
+				return subscriberGroupView{}, sameHandlerNameError(e.op.HandlerTypeName, s.decl.OpName, s.decl.QualifiedGoType, e.op.Name, goType)
+			}
+			s.raw = append(s.raw, e.op.Channel.Address.Raw)
+			s.lits = append(s.lits, addrLiteral)
+			continue
+		}
+		s := &typeSlot{
+			decl: groupHandlerDecl{
+				OpName:            e.op.Name,
+				HandlerTypeName:   e.op.HandlerTypeName,
+				HandlerMethodName: e.op.HandlerMethodName,
+				QualifiedGoType:   goType,
+			},
+			raw:  []string{e.op.Channel.Address.Raw},
+			lits: []string{addrLiteral},
+		}
+		byHandler[e.op.HandlerTypeName] = s
+		slots = append(slots, s)
 	}
 	gv.BindingKeysExprGo = strings.Join(keys, ", ")
+
+	gv.CarriesDoc, gv.BoundDoc = carriesDocDistinct, boundDocDistinct
+	for _, s := range slots {
+		s.decl.RoutingKeyWord = "key"
+		if len(s.raw) > 1 {
+			s.decl.RoutingKeyWord = "keys"
+			gv.CarriesDoc, gv.BoundDoc = carriesDocShared, boundDocShared
+		}
+		quoted := make([]string, len(s.raw))
+		for i, r := range s.raw {
+			quoted[i] = `"` + r + `"`
+		}
+		s.decl.RoutingKeysDoc = strings.Join(quoted, ", ")
+		gv.HandlerDecls = append(gv.HandlerDecls, s.decl)
+		gv.Embeds = append(gv.Embeds, s.decl.HandlerTypeName)
+		gv.Cases = append(gv.Cases, groupCase{
+			KeysGo:            strings.Join(s.lits, ", "),
+			QualifiedGoType:   s.decl.QualifiedGoType,
+			HandlerMethodName: s.decl.HandlerMethodName,
+		})
+	}
 	return gv, nil
+}
+
+// sameHandlerNameError reports two receive operations whose message types
+// differ but map to the same handler interface name (for example the same
+// type name imported from two packages), which one file can't declare twice.
+func sameHandlerNameError(handler, opA, typeA, opB, typeB string) error {
+	return fmt.Errorf("operations %q and %q receive different message types (%s and %s) that both map to the handler interface %s; aapi-codegen names handlers after the message type name, so it can't generate both", opA, opB, typeA, typeB, handler)
 }
 
 // goExportIdentFromQueue derives an exported Go identifier from a queue
