@@ -35,6 +35,11 @@ func runJSONSchemaInProcess(pkg string, initialisms []string, output string, sch
 		StrictAdditionalProperties: generator.StrictAdditionalPropertiesRespectSchema,
 		FormatValidation:           generator.FormatValidationConfig{Enabled: true}, // nil AllowList = all formats
 		Warner:                     func(string) {},                                 // discard warnings — surface via Sources() if needed later
+		// AsyncAPI specs use the OpenAPI integer formats: `format: int64`
+		// means a 64-bit integer. go-jsonschema maps them only on request
+		// (from v0.25.0-rc.7); without it these fields would become int.
+		// TestGenerate_SizedIntegerFormats guards this.
+		OpenAPIIntFormats: true,
 	}
 	for i, sp := range schemaPackages {
 		cfg.SchemaMappings = append(cfg.SchemaMappings, generator.SchemaMapping{
