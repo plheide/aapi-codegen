@@ -60,3 +60,71 @@ operations:
 		}
 	}
 }
+
+// TestGenerate_NullableComponentRef guards how a nullable reference to a
+// components schema is generated: a `oneOf` or `anyOf` of the `$ref` and
+// `{type: null}` becomes a pointer to the referenced type. aapi-codegen
+// writes each components schema to a file of its own, so go-jsonschema sees
+// a `$ref` into another file. Before go-jsonschema v0.25.0-rc.9 the `oneOf`
+// form fell back to interface{}.
+func TestGenerate_NullableComponentRef(t *testing.T) {
+	dir := t.TempDir()
+	spec := `asyncapi: 3.1.0
+info: { title: T, version: 1.0.0 }
+channels:
+  orders:
+    address: orders
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: Orders, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      OrderPlaced:
+        payload:
+          $ref: '#/components/schemas/OrderPlaced'
+operations:
+  sendOrderPlaced:
+    action: send
+    channel: { $ref: '#/channels/orders' }
+    messages:
+      - $ref: '#/channels/orders/messages/OrderPlaced'
+components:
+  schemas:
+    OrderPlaced:
+      title: OrderPlaced
+      type: object
+      properties:
+        shipping:
+          oneOf:
+            - $ref: '#/components/schemas/Address'
+            - type: 'null'
+        billing:
+          anyOf:
+            - $ref: '#/components/schemas/Address'
+            - type: 'null'
+    Address:
+      title: Address
+      type: object
+      properties:
+        city: { type: string }
+`
+	specPath := filepath.Join(dir, "spec.asyncapi.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.go")
+	if _, err := Generate(specPath, Config{Package: "x", Output: out}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	src, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"Shipping", "Billing"} {
+		re := regexp.MustCompile(`(?m)^\s+` + field + `\s+\*Address\s`)
+		if !re.Match(src) {
+			t.Errorf("field %s should be *Address; go-jsonschema's handling of a nullable $ref changed\n--- generated ---\n%s", field, src)
+		}
+	}
+}
