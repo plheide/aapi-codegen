@@ -3,7 +3,7 @@ module github.com/plheide/aapi-codegen
 go 1.26
 
 require (
-	github.com/plheide/go-jsonschema v0.25.0-rc.9
+	github.com/plheide/go-jsonschema v0.25.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
