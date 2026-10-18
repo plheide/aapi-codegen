@@ -20,13 +20,13 @@ The generated package doesn't import an AMQP client. You implement two small int
 ## Install
 
 ```shell
-go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.4
+go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.5
 ```
 
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.4 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.5 -o types.gen.go spec.asyncapi.yaml
 ```
 
 Pin the version: until v0.8.0 is final, `@latest` resolves to v0.7.0, which `go install` can't build.
