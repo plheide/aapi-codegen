@@ -20,16 +20,16 @@ The generated package doesn't import an AMQP client. You implement two small int
 ## Install
 
 ```shell
-go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.5
+go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@latest
 ```
 
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0-rc.5 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0 -o types.gen.go spec.asyncapi.yaml
 ```
 
-Pin the version: until v0.8.0 is final, `@latest` resolves to v0.7.0, which `go install` can't build.
+Pin the version in `go:generate`, so that regenerating doesn't silently pick up a newer release.
 
 Release archives for Linux, macOS and Windows (amd64 and arm64) are on the [releases page](https://github.com/plheide/aapi-codegen/releases). To pin a version per repository without a Go toolchain, copy [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh). It downloads the archive once, caches the binary and prints its path; it works on Linux, macOS and Windows (Git Bash or WSL).
 
@@ -298,7 +298,7 @@ The build is a single Go binary. The JSON Schema pass comes from the [plheide/go
 
 PRs run `go mod tidy -diff`, `go vet`, `go test -race`, `golangci-lint`, and a goreleaser snapshot build via [`.github/workflows/development.yaml`](.github/workflows/development.yaml).
 
-To release, push a `vX.Y.Z` or `vX.Y.Z-rc.N` tag; the release workflow builds the archives with goreleaser. In the change before the tag, bump the default `AAPI_VERSION` in [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh).
+To release, push a `vX.Y.Z` or `vX.Y.Z-rc.N` tag; the release workflow builds the archives with goreleaser. In the change before the tag, bump the default `AAPI_VERSION` in [examples/use-aapi-codegen.sh](examples/use-aapi-codegen.sh) and the version in the `go:generate` example above.
 
 ## JSON Schema support
 
