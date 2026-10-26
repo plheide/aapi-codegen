@@ -26,7 +26,7 @@ go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@latest
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.8.0 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.9.0 -o types.gen.go spec.asyncapi.yaml
 ```
 
 Pin the version in `go:generate`, so that regenerating doesn't silently pick up a newer release.
