@@ -81,6 +81,67 @@ operations:
 	}
 }
 
+// TestGenerate_QueueNameParameterNotInAddress covers queue names whose
+// parameters the generated Subscribe method can't fill in: the method takes
+// the address's parameters, so the queue name may use only those.
+func TestGenerate_QueueNameParameterNotInAddress(t *testing.T) {
+	const tenantAddress = `
+    address: '{tenant}.orders.created'
+    parameters:
+      tenant: { description: Tenant id. }`
+	cases := map[string]struct {
+		channel string // the channel's address and parameters
+		queue   string
+		wantSub string
+	}{
+		"parameter the address lacks": {
+			channel: tenantAddress,
+			queue:   `'{region}.audit-log'`,
+			wantSub: `queue name "{region}.audit-log": parameter "region" is not in address "{tenant}.orders.created"`,
+		},
+		"fixed address": {
+			channel: `
+    address: orders.created`,
+			queue:   `'{tenant}.audit-log'`,
+			wantSub: `queue name "{tenant}.audit-log": parameter "tenant" is not in address "orders.created"`,
+		},
+		"unterminated brace": {
+			channel: tenantAddress,
+			queue:   `'{tenant.audit-log'`,
+			wantSub: `queue name "{tenant.audit-log": unterminated`,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			spec := `asyncapi: 3.1.0
+info: { title: T, version: 1.0.0 }
+channels:
+  orders:` + c.channel + `
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: Events, type: direct }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: ` + c.queue + ` }
+    messages:
+      Status: { $ref: '#/components/messages/Status' }
+operations:
+  consumeStatus:` + receiveOp("orders", "Status") + statusComponent
+
+			err := generateSpec(t, spec, nil)
+			if err == nil {
+				t.Fatal("Generate succeeded; want an error for the queue name")
+			}
+			for _, want := range []string{`operation "consumeStatus"`, c.wantSub} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerate_SameHandlerNameDifferentTypes(t *testing.T) {
 	// OrderMessage imported from two producer packages maps to one
 	// handler name, OrderMessageHandler, with two parameter types.

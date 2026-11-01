@@ -1,0 +1,76 @@
+asyncapi: 3.1.0
+info:
+  title: ParamQueueService — queue names built from channel parameters
+  version: 1.0.0
+  description: |
+    Synthetic fixture for queue names that use the channel address's
+    parameters but differ from the address. The Subscribe method builds
+    the queue name from the same arguments as the binding key: ordersCreated
+    uses every parameter, ordersArchived only its typed (enum) one.
+defaultContentType: application/json
+
+components:
+  messages:
+    AuditEvent:
+      payload:
+        title: AuditEvent
+        type: object
+        required: [id, action]
+        additionalProperties: false
+        properties:
+          id: { type: string }
+          action: { type: string }
+    ArchiveEvent:
+      payload:
+        title: ArchiveEvent
+        type: object
+        required: [id]
+        additionalProperties: false
+        properties:
+          id: { type: string }
+
+channels:
+  ordersCreated:
+    address: '{tenant}.orders.created'
+    parameters:
+      tenant: { description: Tenant id. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: direct }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: '{tenant}.audit-log', durable: true }
+    messages:
+      AuditEvent: { $ref: '#/components/messages/AuditEvent' }
+
+  ordersArchived:
+    address: '{region}.{tenant}.orders.archived'
+    parameters:
+      region:
+        description: Region the orders were archived in.
+        schema:
+          type: string
+          enum: [eu, us]
+      tenant: { description: Tenant id. }
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: direct }
+        bindingVersion: 0.3.0
+      x-aapi-codegen:
+        queue: { name: 'archive.{region}', durable: true }
+    messages:
+      ArchiveEvent: { $ref: '#/components/messages/ArchiveEvent' }
+
+operations:
+  auditCreated:
+    action: receive
+    channel: { $ref: '#/channels/ordersCreated' }
+    messages:
+      - $ref: '#/channels/ordersCreated/messages/AuditEvent'
+  archiveOrders:
+    action: receive
+    channel: { $ref: '#/channels/ordersArchived' }
+    messages:
+      - $ref: '#/channels/ordersArchived/messages/ArchiveEvent'

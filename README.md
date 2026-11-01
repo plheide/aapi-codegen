@@ -26,7 +26,7 @@ go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@latest
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.9.0 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.10.0-rc.1 -o types.gen.go spec.asyncapi.yaml
 ```
 
 Pin the version in `go:generate`, so that regenerating doesn't silently pick up a newer release.
@@ -182,6 +182,7 @@ err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is do
 
 - There is one `<Msg>Handler` interface and one `Subscribe<Msg>` method per `action: receive` operation, named after the message type.
 - The queue name comes from `bindings.amqp.queue.name`, then `bindings.x-aapi-codegen.queue.name`, then the channel address when the channel has `is: queue`. A receive operation needs one of these.
+- The queue name can use the channel address's parameters, such as `{tenant}.audit-log` for the address `{tenant}.orders.created`. The `Subscribe` method fills them in from its arguments. A parameter the address doesn't have stops the generator with an error.
 - The binding key is always the channel address, so the queue's name can differ from its routing key.
 - Your transport maps the handler's result to AMQP:
   - `nil` → ack;
@@ -236,6 +237,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`sharedqueueservice/`](internal/test/sharedqueueservice/) | a routing-key consumer whose queue name differs from the channel address |
 | [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
 | [`sharedmsgqueueservice/`](internal/test/sharedmsgqueueservice/) | one message type on two routing keys of a shared queue, and on a queue of its own |
+| [`paramqueueservice/`](internal/test/paramqueueservice/) | queue names built from the address's parameters, including an enum-typed one |
 
 ## Feature coverage
 
