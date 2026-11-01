@@ -1,8 +1,10 @@
 package ir
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -27,6 +29,28 @@ var paramNameRegexp = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // Nested braces and escaping are not supported — AsyncAPI 3.x doesn't
 // define them. An unmatched `{` is an error.
 func ParseAddress(s string) (Address, error) {
+	addr, err := parseTemplate(s)
+	if err != nil {
+		return Address{}, fmt.Errorf("address %q: %w", s, err)
+	}
+	// Reject duplicate parameter names — Go forbids duplicate function
+	// arguments, so `{a}.{a}` would emit `func(a string, a string)`.
+	// Catching this here gives a clear spec-level error vs a gofmt one.
+	seen := make(map[string]struct{}, len(addr.Params))
+	for _, p := range addr.Params {
+		if _, dup := seen[p.JSONName]; dup {
+			return Address{}, fmt.Errorf("address %q: parameter %q declared more than once", s, p.JSONName)
+		}
+		seen[p.JSONName] = struct{}{}
+	}
+	return addr, nil
+}
+
+// parseTemplate splits a template in address syntax into its literal and
+// `{name}` parts. Unlike ParseAddress, it lets a parameter appear more
+// than once, which is harmless in a template that isn't a function's
+// parameter list.
+func parseTemplate(s string) (Address, error) {
 	addr := Address{Raw: s}
 	var lit strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -42,16 +66,16 @@ func ParseAddress(s string) (Address, error) {
 		}
 		end := strings.IndexByte(s[i+1:], '}')
 		if end < 0 {
-			return Address{}, fmt.Errorf("address %q: unterminated `{`", s)
+			return Address{}, errors.New("unterminated `{`")
 		}
 		end += i + 1
 		name := s[i+1 : end]
 		if name == "" {
-			return Address{}, fmt.Errorf("address %q: empty parameter name at offset %d", s, i)
+			return Address{}, fmt.Errorf("empty parameter name at offset %d", i)
 		}
 		if !paramNameRegexp.MatchString(name) {
-			return Address{}, fmt.Errorf("address %q: parameter %q is not a valid Go identifier (must match %s)",
-				s, name, paramNameRegexp.String())
+			return Address{}, fmt.Errorf("parameter %q is not a valid Go identifier (must match %s)",
+				name, paramNameRegexp.String())
 		}
 		addr.Parts = append(addr.Parts, AddressPart{Param: name})
 		addr.Params = append(addr.Params, AddressParam{
@@ -65,19 +89,30 @@ func ParseAddress(s string) (Address, error) {
 		addr.Parts = append(addr.Parts, AddressPart{Literal: lit.String()})
 	}
 	if len(addr.Parts) == 0 {
-		return Address{}, fmt.Errorf("address %q: empty", s)
-	}
-	// Reject duplicate parameter names — Go forbids duplicate function
-	// arguments, so `{a}.{a}` would emit `func(a string, a string)`.
-	// Catching this here gives a clear spec-level error vs a gofmt one.
-	seen := make(map[string]struct{}, len(addr.Params))
-	for _, p := range addr.Params {
-		if _, dup := seen[p.JSONName]; dup {
-			return Address{}, fmt.Errorf("address %q: parameter %q declared more than once", s, p.JSONName)
-		}
-		seen[p.JSONName] = struct{}{}
+		return Address{}, errors.New("empty")
 	}
 	return addr, nil
+}
+
+// TemplateExpr renders the Go expression for tmpl, a template in address
+// syntax built from this address's parameters, such as a queue name:
+// "{tenant}.audit-log" on the address "{tenant}.orders.created" gives
+// `tenant + ".audit-log"`. Parameters are referenced as RoutingKeyExpr
+// references them, so a typed parameter gets its `string(name)` cast. A
+// template without parameters gives a quoted literal. A parameter that
+// the address doesn't declare is an error.
+func (a Address) TemplateExpr(tmpl string) (string, error) {
+	t, err := parseTemplate(tmpl)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range t.Params {
+		if !slices.ContainsFunc(a.Params, func(ap AddressParam) bool { return ap.JSONName == p.JSONName }) {
+			return "", fmt.Errorf("parameter %q is not in address %q", p.JSONName, a.Raw)
+		}
+	}
+	t.Params = a.Params
+	return t.RoutingKeyExpr(), nil
 }
 
 // RoutingKeyExpr renders the Go expression that constructs the routing

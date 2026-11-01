@@ -189,8 +189,8 @@ type subscriberQueueView struct {
 	NameExpr string
 	// NameExprGo is the Go expression that computes the queue name at
 	// runtime from the address parameters. For a literal queue name it's
-	// a quoted string; for a parameterised one it's a Sprintf or string
-	// concatenation expression.
+	// a quoted string; for a parameterised one it's a string
+	// concatenation, as for the routing key.
 	NameExprGo string
 }
 
@@ -298,6 +298,10 @@ func RenderSubscriber(spec *ir.Spec) (string, error) {
 			return "", fmt.Errorf("operation %q: only AMQP bindings are supported, got %q", op.Name, op.Channel.Binding.Kind())
 		}
 		queue := queueNameTemplate(amqp, op.Channel.Address)
+		queueExpr, err := queueNameExpr(amqp, op.Channel.Address)
+		if err != nil {
+			return "", fmt.Errorf("operation %q: %w", op.Name, err)
+		}
 		ov := subscriberOpView{
 			Name:              op.Name,
 			GoFuncName:        op.GoFuncName,
@@ -311,7 +315,7 @@ func RenderSubscriber(spec *ir.Spec) (string, error) {
 			Message: op.Message,
 			Queue: subscriberQueueView{
 				NameExpr:   queue,
-				NameExprGo: queueNameExpr(amqp, op.Channel.Address),
+				NameExprGo: queueExpr,
 			},
 			BindingKeysExprGo: op.Channel.Address.RoutingKeyExpr(),
 		}
@@ -542,15 +546,16 @@ func queueNameTemplate(amqp *ir.AMQPBinding, addr ir.Address) string {
 }
 
 // queueNameExpr returns the Go expression that builds the queue name at
-// runtime. When the queue name matches the channel address (queue-mode
-// channels typically declare them equal), reuses Address.RoutingKeyExpr
-// which already knows how to interpolate the parameters. When the queue
-// name is a static string distinct from the address, emits a quoted
-// literal.
-func queueNameExpr(amqp *ir.AMQPBinding, addr ir.Address) string {
+// runtime. The name can use the channel address's parameters, such as
+// "{tenant}.audit-log", which are filled in as in the routing key
+// (Address.TemplateExpr); a queue-mode channel's name is the address
+// itself. A name without parameters is a quoted literal. One that uses a
+// parameter the address doesn't declare is an error.
+func queueNameExpr(amqp *ir.AMQPBinding, addr ir.Address) (string, error) {
 	name := queueNameTemplate(amqp, addr)
-	if name == addr.Raw {
-		return addr.RoutingKeyExpr()
+	expr, err := addr.TemplateExpr(name)
+	if err != nil {
+		return "", fmt.Errorf("queue name %q: %w", name, err)
 	}
-	return fmt.Sprintf("%q", name)
+	return expr, nil
 }

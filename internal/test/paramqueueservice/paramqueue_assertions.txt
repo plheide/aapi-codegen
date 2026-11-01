@@ -1,0 +1,56 @@
+// Runtime assertions for queue names built from channel parameters.
+// Dropped into the tmp module's paramqueuev1 package next to the
+// generated file.
+
+package paramqueuev1
+
+import (
+	"context"
+	"slices"
+	"testing"
+)
+
+type recordingTransport struct {
+	queue string
+	keys  []string
+}
+
+func (r *recordingTransport) Subscribe(_ context.Context, queueName string, bindingKeys []string,
+	_ func(ctx context.Context, routingKey string, body []byte) error) error {
+	r.queue, r.keys = queueName, bindingKeys
+	return nil
+}
+
+type auditHandler struct{}
+
+func (auditHandler) HandleAuditEvent(context.Context, AuditEvent) error { return nil }
+
+type archiveHandler struct{}
+
+func (archiveHandler) HandleArchiveEvent(context.Context, ArchiveEvent) error { return nil }
+
+func TestSubscribeAuditEvent_QueueNameUsesTenant(t *testing.T) {
+	tr := &recordingTransport{}
+	if err := NewSubscriber(tr).SubscribeAuditEvent(context.Background(), "acme", auditHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if tr.queue != "acme.audit-log" {
+		t.Errorf("queue = %q, want %q", tr.queue, "acme.audit-log")
+	}
+	if want := []string{"acme.orders.created"}; !slices.Equal(tr.keys, want) {
+		t.Errorf("binding keys = %q, want %q", tr.keys, want)
+	}
+}
+
+func TestSubscribeArchiveEvent_QueueNameUsesTypedRegion(t *testing.T) {
+	tr := &recordingTransport{}
+	if err := NewSubscriber(tr).SubscribeArchiveEvent(context.Background(), RegionEu, "acme", archiveHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if tr.queue != "archive.eu" {
+		t.Errorf("queue = %q, want %q", tr.queue, "archive.eu")
+	}
+	if want := []string{"eu.acme.orders.archived"}; !slices.Equal(tr.keys, want) {
+		t.Errorf("binding keys = %q, want %q", tr.keys, want)
+	}
+}
