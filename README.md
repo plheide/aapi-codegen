@@ -206,7 +206,7 @@ Invalid JSON fails at `json.Unmarshal` with an error that names the violation.
 Some formats change the Go type instead:
 
 - `date-time` → `time.Time`;
-- `date` and `time` → `types.SerializableDate` and `types.SerializableTime` from `github.com/plheide/go-jsonschema/pkg/types`. That package then becomes a dependency of your module.
+- `date`, `time` and `duration` → `types.SerializableDate`, `types.SerializableTime` and `types.Duration` from `github.com/plheide/go-jsonschema/pkg/types`. That package then becomes a dependency of your module. A `types.Duration` is read and written as an ISO 8601 duration, such as `PT1H30M`.
 
 To write your own `UnmarshalJSON`, opt out. You might do this to accept a legacy wire format alongside the canonical one; two `UnmarshalJSON` methods on one type would not compile.
 
