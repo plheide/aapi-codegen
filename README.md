@@ -26,7 +26,7 @@ go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@latest
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.10.0-rc.1 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.10.0 -o types.gen.go spec.asyncapi.yaml
 ```
 
 Pin the version in `go:generate`, so that regenerating doesn't silently pick up a newer release.
@@ -206,7 +206,7 @@ Invalid JSON fails at `json.Unmarshal` with an error that names the violation.
 Some formats change the Go type instead:
 
 - `date-time` → `time.Time`;
-- `date` and `time` → `types.SerializableDate` and `types.SerializableTime` from `github.com/plheide/go-jsonschema/pkg/types`. That package then becomes a dependency of your module.
+- `date`, `time` and `duration` → `types.SerializableDate`, `types.SerializableTime` and `types.Duration` from `github.com/plheide/go-jsonschema/pkg/types`. That package then becomes a dependency of your module. A `types.Duration` is written as an ISO 8601 duration, such as `PT1H30M`, and read from one or from a JSON number of nanoseconds, as for a `time.Duration`.
 
 To write your own `UnmarshalJSON`, opt out. You might do this to accept a legacy wire format alongside the canonical one; two `UnmarshalJSON` methods on one type would not compile.
 
