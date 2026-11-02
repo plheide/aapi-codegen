@@ -29,7 +29,7 @@
 # offline.
 set -euo pipefail
 
-AAPI_VERSION="${AAPI_VERSION:-v0.10.0-rc.1}"
+AAPI_VERSION="${AAPI_VERSION:-v0.10.0}"
 AAPI_REPO="${AAPI_REPO:-plheide/aapi-codegen}"
 AAPI_CACHE="${AAPI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen/${AAPI_VERSION}}"
 
