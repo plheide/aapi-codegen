@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +128,61 @@ components:
 		if !re.Match(src) {
 			t.Errorf("field %s should be *Address; go-jsonschema's handling of a nullable $ref changed\n--- generated ---\n%s", field, src)
 		}
+	}
+}
+
+// TestGenerate_ReportsSchemaWarnings guards Config.Warn: go-jsonschema's
+// warning that a payload declares a keyword the generated code doesn't
+// check reaches it, and a payload without one gives no warning.
+func TestGenerate_ReportsSchemaWarnings(t *testing.T) {
+	const spec = `asyncapi: 3.1.0
+info: { title: T, version: 1.0.0 }
+channels:
+  orders:
+    address: orders
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: Orders, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      OrderPlaced:
+        payload:
+          title: OrderPlaced
+          type: object
+%KEYWORD%          properties:
+            id: { type: string }
+operations:
+  sendOrderPlaced:
+    action: send
+    channel: { $ref: '#/channels/orders' }
+    messages:
+      - $ref: '#/channels/orders/messages/OrderPlaced'
+`
+	for name, c := range map[string]struct {
+		keyword string
+		want    []string
+	}{
+		"unchecked keyword": {
+			keyword: "          minProperties: 1\n",
+			want:    []string{"schema fidelity: type OrderPlaced does not enforce all it declares: minProperties not checked"},
+		},
+		"no unchecked keyword": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			specPath := filepath.Join(dir, "spec.asyncapi.yaml")
+			if err := os.WriteFile(specPath, []byte(strings.ReplaceAll(spec, "%KEYWORD%", c.keyword)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			cfg := Config{Package: "x", Output: filepath.Join(dir, "out.go"), Warn: func(msg string) { got = append(got, msg) }}
+			if _, err := Generate(specPath, cfg); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("warnings = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
