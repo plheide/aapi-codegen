@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OrderPlaced",
+  "description": "Synthetic order message: the shared header's fields plus the order's own, with no other keys allowed.",
+  "allOf": [
+    { "$ref": "../../common/v1/header.schema.json" },
+    {
+      "type": "object",
+      "required": ["orderID", "quantity"],
+      "properties": {
+        "orderID": { "type": "string", "description": "Order identifier." },
+        "quantity": { "type": "integer", "minimum": 1, "description": "Number of items ordered." }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

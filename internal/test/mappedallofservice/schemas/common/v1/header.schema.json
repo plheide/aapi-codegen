@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.example.com/mappedallofservice/common/v1/header.schema.json",
+  "title": "Header",
+  "description": "Synthetic message header shared across specs, mapped to its own Go package through schema-packages.",
+  "type": "object",
+  "required": ["traceID", "tenantID"],
+  "properties": {
+    "traceID": { "type": "string", "description": "Distributed-tracing identifier." },
+    "tenantID": { "type": "string", "description": "Tenant the message belongs to." }
+  }
+}

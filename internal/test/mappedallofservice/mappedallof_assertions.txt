@@ -1,0 +1,57 @@
+// Runtime assertions for an allOf member from a mapped package under
+// unevaluatedProperties: false. Dropped into the tmp module's orderv1
+// package next to the generated file.
+
+package orderv1
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+const validOrder = `{"traceID":"t-1","tenantID":"acme","orderID":"o-1","quantity":2}`
+
+func TestOrderPlaced_DecodesValidMessage(t *testing.T) {
+	var msg OrderPlaced
+	if err := json.Unmarshal([]byte(validOrder), &msg); err != nil {
+		t.Fatalf("decode valid message: %v", err)
+	}
+	if msg.TraceID != "t-1" || msg.TenantID != "acme" || msg.OrderID != "o-1" || msg.Quantity != 2 {
+		t.Errorf("decoded %+v", msg)
+	}
+}
+
+func TestOrderPlaced_Rejects(t *testing.T) {
+	for name, c := range map[string]struct {
+		body, wantErr string
+	}{
+		// unevaluatedProperties: false, over the header's and the order's
+		// properties together.
+		"a key no allOf member declares": {
+			body:    `{"traceID":"t-1","tenantID":"acme","orderID":"o-1","quantity":2,"extra":1}`,
+			wantErr: "additional properties not allowed",
+		},
+		// The header's own keywords still apply.
+		"a missing header field": {
+			body:    `{"tenantID":"acme","orderID":"o-1","quantity":2}`,
+			wantErr: "traceID",
+		},
+		// And so do the order's.
+		"a quantity below its minimum": {
+			body:    `{"traceID":"t-1","tenantID":"acme","orderID":"o-1","quantity":0}`,
+			wantErr: "must be >=",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var msg OrderPlaced
+			err := json.Unmarshal([]byte(c.body), &msg)
+			if err == nil {
+				t.Fatalf("decoded %s without an error", c.body)
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("error %q does not mention %q", err, c.wantErr)
+			}
+		})
+	}
+}

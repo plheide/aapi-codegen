@@ -197,7 +197,7 @@ err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is do
 
 By default, the generated `UnmarshalJSON` methods enforce the schema:
 
-- `required` fields and `additionalProperties: false`;
+- `required` fields, `additionalProperties: false` and `unevaluatedProperties: false`;
 - `enum`, numeric and string bounds, `pattern`, and array constraints;
 - the formats `uuid`, `email`, `uri`, `uri-reference`, `hostname` and `regex`.
 
@@ -238,6 +238,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
 | [`sharedmsgqueueservice/`](internal/test/sharedmsgqueueservice/) | one message type on two routing keys of a shared queue, and on a queue of its own |
 | [`paramqueueservice/`](internal/test/paramqueueservice/) | queue names built from the address's parameters, including an enum-typed one |
+| [`mappedallofservice/`](internal/test/mappedallofservice/) | an `allOf` member that `schema-packages` maps to another package, under `unevaluatedProperties: false` |
 
 ## Feature coverage
 
@@ -307,7 +308,7 @@ To release, push a `vX.Y.Z` or `vX.Y.Z-rc.N` tag; the release workflow builds th
 The JSON Schema → Go pass is [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema), a fork of [omissis/go-jsonschema](https://github.com/omissis/go-jsonschema), called as a library. aapi-codegen configures it to:
 
 - name structs after their `title`;
-- respect `additionalProperties` as the schema declares it;
+- respect `additionalProperties` and `unevaluatedProperties` as the schema declares them;
 - validate formats;
 - emit `json` tags;
 - apply the configured initialisms.
