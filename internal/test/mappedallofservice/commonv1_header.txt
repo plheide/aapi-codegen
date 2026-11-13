@@ -1,0 +1,12 @@
+// Stand-in for the package that schemas/common/v1/header.schema.json is
+// mapped to. The generated OrderPlaced copies the header's fields, so it
+// may use nothing from here; the package exists so that an import of it
+// resolves and only an unused import fails the build.
+
+package commonv1
+
+// Header matches schemas/common/v1/header.schema.json.
+type Header struct {
+	TenantID string `json:"tenantID"`
+	TraceID  string `json:"traceID"`
+}

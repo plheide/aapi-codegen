@@ -24,7 +24,13 @@ import (
 // entries. The library still emits a Go file per mapped schema (same
 // "wart" go-jsonschema/notest.md flags upstream); we route those
 // outputs into a per-call discard directory the caller cleans up.
-func runJSONSchemaInProcess(pkg string, initialisms []string, output string, schemas []string, schemaPackages []SchemaPackageMapping, discardDir string, omitValidation bool) error {
+//
+// warn receives go-jsonschema's warnings, such as a schema keyword the
+// generated code doesn't check; nil discards them.
+func runJSONSchemaInProcess(pkg string, initialisms []string, output string, schemas []string, schemaPackages []SchemaPackageMapping, discardDir string, omitValidation bool, warn func(string)) error {
+	if warn == nil {
+		warn = func(string) {}
+	}
 	cfg := generator.Config{
 		DefaultPackageName:         pkg,
 		DefaultOutputName:          output,
@@ -34,7 +40,7 @@ func runJSONSchemaInProcess(pkg string, initialisms []string, output string, sch
 		Tags:                       []string{"json"},
 		StrictAdditionalProperties: generator.StrictAdditionalPropertiesRespectSchema,
 		FormatValidation:           generator.FormatValidationConfig{Enabled: true}, // nil AllowList = all formats
-		Warner:                     func(string) {},                                 // discard warnings — surface via Sources() if needed later
+		Warner:                     warn,
 		// AsyncAPI specs use the OpenAPI integer formats: `format: int64`
 		// means a 64-bit integer. go-jsonschema maps them only on request
 		// (from v0.25.0-rc.7); without it these fields would become int.

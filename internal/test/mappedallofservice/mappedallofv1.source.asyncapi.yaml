@@ -1,0 +1,36 @@
+asyncapi: 3.1.0
+info:
+  title: MappedAllOfService — an allOf member from another package
+  version: 1.0.0
+  description: |
+    Synthetic fixture for a payload composed with allOf from a header
+    schema that schema-packages maps to its own Go package, plus the
+    order's own properties, under unevaluatedProperties: false.
+
+defaultContentType: application/json
+
+channels:
+  orderPlaced:
+    address: orders.placed
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: OrdersExchange, type: direct }
+        bindingVersion: 0.3.0
+    messages:
+      OrderPlaced:
+        payload:
+          $ref: './schemas/order/v1/order-placed.schema.json'
+
+operations:
+  sendOrderPlaced:
+    action: send
+    channel: { $ref: '#/channels/orderPlaced' }
+    messages:
+      - $ref: '#/channels/orderPlaced/messages/OrderPlaced'
+
+x-aapi-codegen:
+  schema-packages:
+    - id: https://schemas.example.com/mappedallofservice/common/v1/header.schema.json
+      package: aapicodegen_mappedallof_test/commonv1
+      alias: commonv1

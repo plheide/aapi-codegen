@@ -26,7 +26,7 @@ go install github.com/plheide/aapi-codegen/cmd/aapi-codegen@latest
 Or run it from a `go:generate` directive without installing it:
 
 ```go
-//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.10.0 -o types.gen.go spec.asyncapi.yaml
+//go:generate go run github.com/plheide/aapi-codegen/cmd/aapi-codegen@v0.11.0 -o types.gen.go spec.asyncapi.yaml
 ```
 
 Pin the version in `go:generate`, so that regenerating doesn't silently pick up a newer release.
@@ -197,11 +197,19 @@ err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is do
 
 By default, the generated `UnmarshalJSON` methods enforce the schema:
 
-- `required` fields and `additionalProperties: false`;
+- `required` fields, `additionalProperties: false` and `unevaluatedProperties: false`;
 - `enum`, numeric and string bounds, `pattern`, and array constraints;
 - the formats `uuid`, `email`, `uri`, `uri-reference`, `hostname` and `regex`.
 
 Invalid JSON fails at `json.Unmarshal` with an error that names the violation.
+
+Where the generated code doesn't check something the schema declares, such as `minProperties`, go-jsonschema reports it, and aapi-codegen prints the report to stderr:
+
+```text
+aapi-codegen: warning: schema fidelity: type OrderPlaced does not enforce all it declares: minProperties not checked
+```
+
+The file is still written, and the exit status doesn't change.
 
 Some formats change the Go type instead:
 
@@ -238,6 +246,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
 | [`sharedmsgqueueservice/`](internal/test/sharedmsgqueueservice/) | one message type on two routing keys of a shared queue, and on a queue of its own |
 | [`paramqueueservice/`](internal/test/paramqueueservice/) | queue names built from the address's parameters, including an enum-typed one |
+| [`mappedallofservice/`](internal/test/mappedallofservice/) | an `allOf` member that `schema-packages` maps to another package, under `unevaluatedProperties: false` |
 
 ## Feature coverage
 
@@ -286,6 +295,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
+- **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `properties` or `unevaluatedProperties`, are ignored without a warning. Put them in an `allOf` beside the `$ref` instead.
 - **Imported type names.** An imported message's Go type name is the producer's message key; see [Consuming another service's messages](#consuming-another-services-messages).
 
 ## Development
@@ -307,7 +317,7 @@ To release, push a `vX.Y.Z` or `vX.Y.Z-rc.N` tag; the release workflow builds th
 The JSON Schema → Go pass is [plheide/go-jsonschema](https://github.com/plheide/go-jsonschema), a fork of [omissis/go-jsonschema](https://github.com/omissis/go-jsonschema), called as a library. aapi-codegen configures it to:
 
 - name structs after their `title`;
-- respect `additionalProperties` as the schema declares it;
+- respect `additionalProperties` and `unevaluatedProperties` as the schema declares them;
 - validate formats;
 - emit `json` tags;
 - apply the configured initialisms.
