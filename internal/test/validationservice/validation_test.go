@@ -3,7 +3,8 @@
 // Three sub-tests prove:
 //   - DefaultEnforced: with no config, go-jsonschema's UnmarshalJSON
 //     methods are emitted; Unmarshal rejects JSON missing required
-//     fields with a clear error.
+//     fields with a clear error, and JSON that breaks the payload's
+//     if/then, dependentRequired, dependencies or not.
 //   - OptOutViaConfig: -config with omit-validation: true suppresses
 //     UnmarshalJSON; Unmarshal accepts the same missing-field JSON
 //     (plain Go json behaviour).
@@ -126,6 +127,62 @@ func TestUnmarshal_AdditionalPropertiesRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "extra") {
 		t.Errorf("error should name extra field: %v", err)
+	}
+}
+
+// ping is a valid PingMessage with the given properties added.
+func ping(t *testing.T, extra map[string]any) []byte {
+	t.Helper()
+	m := map[string]any{"id": "x", "msg": "hi"}
+	for k, v := range extra {
+		m[k] = v
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestUnmarshal_PropertyDependencies(t *testing.T) {
+	for name, c := range map[string]struct {
+		extra   map[string]any
+		wantErr string
+	}{
+		"if/then: an echo without a reply address": {
+			extra:   map[string]any{"kind": "echo"},
+			wantErr: "replyTo",
+		},
+		"dependentRequired: a reply address without a correlation ID": {
+			extra:   map[string]any{"replyTo": "q"},
+			wantErr: "correlationID",
+		},
+		"dependencies: a retry without its attempt number": {
+			extra:   map[string]any{"retryOf": "m-1"},
+			wantErr: "attempt",
+		},
+		"not: both a relative and an absolute expiry": {
+			extra:   map[string]any{"ttlSeconds": 5, "expiresAt": "2026-11-15T12:00:00Z"},
+			wantErr: "ttlSeconds",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var m PingMessage
+			err := json.Unmarshal(ping(t, c.extra), &m)
+			if err == nil {
+				t.Fatalf("decoded %s without an error", ping(t, c.extra))
+			}
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("error %q does not mention %q", err, c.wantErr)
+			}
+		})
+	}
+
+	// A message that meets all of them decodes.
+	var m PingMessage
+	valid := ping(t, map[string]any{"kind": "echo", "replyTo": "q", "correlationID": "c", "retryOf": "m-1", "attempt": 2, "ttlSeconds": 5})
+	if err := json.Unmarshal(valid, &m); err != nil {
+		t.Errorf("decode %s: %v", valid, err)
 	}
 }
 `

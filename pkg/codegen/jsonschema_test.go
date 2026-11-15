@@ -133,7 +133,8 @@ components:
 
 // TestGenerate_ReportsSchemaWarnings guards Config.Warn: go-jsonschema's
 // warning that a payload declares a keyword the generated code doesn't
-// check reaches it, and a payload without one gives no warning.
+// check reaches it, as does its warning about keywords beside a $ref, and
+// a payload without either gives no warning.
 func TestGenerate_ReportsSchemaWarnings(t *testing.T) {
 	const spec = `asyncapi: 3.1.0
 info: { title: T, version: 1.0.0 }
@@ -150,14 +151,20 @@ channels:
         payload:
           title: OrderPlaced
           type: object
-%KEYWORD%          properties:
+          properties:
             id: { type: string }
-operations:
+%KEYWORD%operations:
   sendOrderPlaced:
     action: send
     channel: { $ref: '#/channels/orders' }
     messages:
       - $ref: '#/channels/orders/messages/OrderPlaced'
+components:
+  schemas:
+    Header:
+      type: object
+      properties:
+        traceID: { type: string }
 `
 	for name, c := range map[string]struct {
 		keyword string
@@ -166,6 +173,10 @@ operations:
 		"unchecked keyword": {
 			keyword: "          minProperties: 1\n",
 			want:    []string{"schema fidelity: type OrderPlaced does not enforce all it declares: minProperties not checked"},
+		},
+		"keyword beside a $ref": {
+			keyword: "            header: { $ref: '#/components/schemas/Header', required: [traceID] }\n",
+			want:    []string{"schema fidelity: type OrderPlacedHeader does not enforce all it declares: required beside $ref not checked"},
 		},
 		"no unchecked keyword": {},
 	} {

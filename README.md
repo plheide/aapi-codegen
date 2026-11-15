@@ -198,6 +198,9 @@ err := sub.SubscribeOrderMessage(ctx, "acme", handler) // blocks until ctx is do
 By default, the generated `UnmarshalJSON` methods enforce the schema:
 
 - `required` fields, `additionalProperties: false` and `unevaluatedProperties: false`;
+- `dependentRequired` and the property lists of draft-07's `dependencies`. A schema file that declares its draft gets the one that draft defines; one that declares none, like an inline payload, gets both;
+- a `not` of `required`: `not: {required: [a, b]}` forbids having both;
+- an `if`/`then`/`else` keyed on one property's `const` or `enum`: each branch's `required`, a `not` of `required`, and a `const` or `enum` it narrows a property to;
 - `enum`, numeric and string bounds, `pattern`, and array constraints;
 - the formats `uuid`, `email`, `uri`, `uri-reference`, `hostname` and `regex`.
 
@@ -236,7 +239,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`inlineservice/`](internal/test/inlineservice/) | inline payloads and `components.schemas` |
 | [`sharedmsgservice/`](internal/test/sharedmsgservice/) | `components.messages` referenced from several channels |
 | [`messagecollisionservice/`](internal/test/messagecollisionservice/) | inline and component message keys that collide |
-| [`validationservice/`](internal/test/validationservice/) | the `omit-validation` opt-out |
+| [`validationservice/`](internal/test/validationservice/) | default validation, including `if`/`then`, `dependentRequired`, `dependencies` and `not`; the `omit-validation` opt-out |
 | [`consumerservice/`](internal/test/consumerservice/) | `action: receive`, `<Msg>Handler`, `Subscribe<Msg>`, `ErrDrop`, queue-mode channels |
 | [`bindingsservice/`](internal/test/bindingsservice/) | `SendOption`, message and operation AMQP bindings |
 | [`enumparams/`](internal/test/enumparams/) | enum-typed channel parameters, shared by publisher and subscriber |
@@ -295,7 +298,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
-- **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `properties` or `unevaluatedProperties`, are ignored without a warning. Put them in an `allOf` beside the `$ref` instead.
+- **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Beside a message payload's own `$ref`, they're dropped without a warning. Put them in an `allOf` beside the `$ref` instead.
 - **Imported type names.** An imported message's Go type name is the producer's message key; see [Consuming another service's messages](#consuming-another-services-messages).
 
 ## Development

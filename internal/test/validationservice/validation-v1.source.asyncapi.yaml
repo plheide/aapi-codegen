@@ -30,6 +30,25 @@ channels:
           properties:
             id:  { type: string }
             msg: { type: string }
+            kind: { type: string, enum: [ping, echo] }
+            replyTo: { type: string }
+            correlationID: { type: string }
+            retryOf: { type: string }
+            attempt: { type: integer }
+            ttlSeconds: { type: integer }
+            expiresAt: { type: string }
+          # An echo needs an address to reply to,
+          allOf:
+            - if: { properties: { kind: { const: echo } }, required: [kind] }
+              then: { required: [replyTo] }
+          # a reply address needs a correlation ID,
+          dependentRequired:
+            replyTo: [correlationID]
+          # and a retry needs its attempt number, in draft-07's spelling.
+          dependencies:
+            retryOf: [attempt]
+          # An expiry is relative or absolute, not both.
+          not: { required: [ttlSeconds, expiresAt] }
 
 operations:
   sendPing:
