@@ -2,10 +2,9 @@
 # Print the absolute path to a cached aapi-codegen binary, downloading
 # it from the plheide/aapi-codegen GitHub release on first use.
 #
-# Modelled on plheide/go-jsonschema's `use-go-jsonschema.sh` pattern —
-# same shape, same caching, same env-var pinning convention. Copy this
-# file into the consuming repo's scripts/ directory unchanged (or adapt
-# the defaults at the top if you want a different fork or version pin).
+# Copy this file into the consuming repo's scripts/ directory unchanged
+# (or adapt the defaults at the top if you want a different fork or
+# version pin).
 #
 # Pin the version with the AAPI_VERSION env var. In this copy the
 # default is the latest aapi-codegen release, bumped in the change
@@ -24,14 +23,15 @@
 # Git Bash on Windows reports `uname -s` as `MINGW64_NT-*` etc; we
 # normalise back to "Windows" to match goreleaser's archive naming.
 #
-# The downloaded archive is cached at
-# $HOME/.cache/aapi-codegen/<version>/ so subsequent invocations are
-# offline.
+# The binary is cached in $AAPI_CACHE/<version>/, so later calls work
+# offline and each version keeps its own binary. AAPI_CACHE defaults to
+# ${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen.
 set -euo pipefail
 
-AAPI_VERSION="${AAPI_VERSION:-v0.12.0}"
+AAPI_VERSION="${AAPI_VERSION:-v0.12.1}"
 AAPI_REPO="${AAPI_REPO:-plheide/aapi-codegen}"
-AAPI_CACHE="${AAPI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen/${AAPI_VERSION}}"
+AAPI_CACHE="${AAPI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen}"
+VERSION_DIR="${AAPI_CACHE}/${AAPI_VERSION}"
 
 # Map host platform to the release-asset naming (matches the
 # .goreleaser.yaml archive name_template + format_overrides — keep in
@@ -58,7 +58,7 @@ case "$(uname -m)" in
     *)             echo "use-aapi-codegen: unsupported arch $(uname -m) — release archives are amd64/arm64 only" >&2; exit 1 ;;
 esac
 
-BIN="${AAPI_CACHE}/aapi-codegen${bin_suffix}"
+BIN="${VERSION_DIR}/aapi-codegen${bin_suffix}"
 if [ -x "$BIN" ]; then
     echo "$BIN"
     exit 0
@@ -74,10 +74,10 @@ url="https://github.com/${AAPI_REPO}/releases/download/${AAPI_VERSION}/${asset}"
 # rename first wins, the other sees its rename fail because the target
 # now exists and falls back to using the already-cached binary.
 #
-# Without this, both processes raced on `tar -xz -C $AAPI_CACHE` and
+# Without this, both processes raced on `tar -xz -C $VERSION_DIR` and
 # one could observe the other's half-extracted bytes.
-mkdir -p "$(dirname "$AAPI_CACHE")"
-staging=$(mktemp -d "${AAPI_CACHE}.staging.XXXXXX")
+mkdir -p "$AAPI_CACHE"
+staging=$(mktemp -d "${VERSION_DIR}.staging.XXXXXX")
 trap 'rm -rf "$staging"' EXIT
 
 echo "use-aapi-codegen: fetching ${asset} from ${AAPI_REPO}@${AAPI_VERSION}" >&2
@@ -112,7 +112,7 @@ rm -f "${staging}/${asset}"
 # which is concurrency-safe. If another process won the race the
 # directory is already in place and `mv` errors; in that case we trust
 # the existing cache content.
-if ! mv "$staging" "$AAPI_CACHE" 2>/dev/null; then
+if ! mv "$staging" "$VERSION_DIR" 2>/dev/null; then
     rm -rf "$staging"
 fi
 

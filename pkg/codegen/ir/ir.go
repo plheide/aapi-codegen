@@ -169,6 +169,10 @@ type Message struct {
 	// Empty for local messages. v0.5+.
 	ImportedPackage string
 	ImportedAlias   string
+	// PayloadIsRef is set when the payload schema's root is a $ref. Then
+	// go-jsonschema generates the type of the schema it points at, so
+	// GoTypeName may be declared nowhere; it explains that error.
+	PayloadIsRef bool
 }
 
 // QualifiedGoType returns the type name as the templates should emit it.

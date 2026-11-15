@@ -26,6 +26,9 @@ type Schema struct {
 	Required   []string           `json:"required"`
 	Properties map[string]any     `json:"properties"`
 	Defs       map[string]*Schema `json:"$defs"`
+	// Ref is the schema's own `$ref`. go-jsonschema generates the type of
+	// the schema it points at, not one named after Title.
+	Ref string `json:"$ref"`
 	// SourcePath is the absolute path the schema was loaded from. Used
 	// only for error messages.
 	SourcePath string `json:"-"`

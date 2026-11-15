@@ -72,9 +72,10 @@ type Config struct {
 	// OR-merged with the spec extension equivalents. v0.2+.
 	OmitPublishers  bool
 	OmitSubscribers bool
-	// Warn, when set, receives each warning go-jsonschema reports while
-	// it generates the payload types, such as a schema keyword the
-	// generated code doesn't check. Nil discards them. Warnings don't
+	// Warn, when set, receives each warning about a schema keyword the
+	// generated code doesn't check: those go-jsonschema reports while it
+	// generates the payload types, and aapi-codegen's own about keywords
+	// beside a message payload's $ref. Nil discards them. Warnings don't
 	// make Generate fail.
 	Warn func(msg string)
 }
@@ -101,6 +102,13 @@ func Generate(specPath string, cfg Config) (string, error) {
 	// synthetic schema file → one Go type).
 	if err := doc.ResolveMessageRefs(); err != nil {
 		return "", fmt.Errorf("resolve component message refs: %w", err)
+	}
+	// A payload's own $ref is resolved here, not by go-jsonschema, so
+	// the keywords beside it are reported here too.
+	if cfg.Warn != nil {
+		for _, w := range payloadRefSiblingWarnings(doc) {
+			cfg.Warn(w)
+		}
 	}
 	// Merge spec-extension schema-packages with anything passed via
 	// CLI/config. Spec is canonical (Q1); CLI/config entries supplement
@@ -231,6 +239,9 @@ func Generate(specPath string, cfg Config) (string, error) {
 		return "", err
 	}
 	if err := checkDuplicateDeclarations(combined); err != nil {
+		return "", err
+	}
+	if err := checkPayloadTypesDeclared(combined, spec, !cfg.OmitPublishers, !cfg.OmitSubscribers); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(cfg.Output, combined, 0o600); err != nil {
