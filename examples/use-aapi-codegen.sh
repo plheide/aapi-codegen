@@ -28,7 +28,7 @@
 # ${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen.
 set -euo pipefail
 
-AAPI_VERSION="${AAPI_VERSION:-v0.12.0}"
+AAPI_VERSION="${AAPI_VERSION:-v0.12.1}"
 AAPI_REPO="${AAPI_REPO:-plheide/aapi-codegen}"
 AAPI_CACHE="${AAPI_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/aapi-codegen}"
 VERSION_DIR="${AAPI_CACHE}/${AAPI_VERSION}"
