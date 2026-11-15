@@ -6,6 +6,8 @@ import (
 	"go/parser"
 	"go/token"
 	"strings"
+
+	"github.com/plheide/aapi-codegen/pkg/codegen/ir"
 )
 
 // checkDuplicateDeclarations rejects generated source that declares a
@@ -57,6 +59,44 @@ func checkDuplicateDeclarations(src []byte) error {
 	}
 	if len(dups) > 0 {
 		return fmt.Errorf("generated code would declare %s more than once; two spec elements map to the same Go name", strings.Join(dups, ", "))
+	}
+	return nil
+}
+
+// checkPayloadTypesDeclared rejects generated source that lacks the Go type
+// of a local message's payload, where a rendered publisher or subscriber
+// uses it. The type name is the payload schema's title, but for a schema
+// whose root is a $ref, go-jsonschema generates the type of the schema the
+// $ref points at, so a title that names neither leaves the type undeclared.
+// Without this check the generator would write code that doesn't compile.
+func checkPayloadTypesDeclared(src []byte, spec *ir.Spec, publishers, subscribers bool) error {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "generated.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		return fmt.Errorf("parse generated source: %w", err)
+	}
+	declared := make(map[string]bool)
+	for _, decl := range file.Decls {
+		if d, ok := decl.(*ast.GenDecl); ok {
+			for _, s := range d.Specs {
+				if ts, ok := s.(*ast.TypeSpec); ok {
+					declared[ts.Name.Name] = true
+				}
+			}
+		}
+	}
+	for _, op := range spec.Operations {
+		m := op.Message
+		if m == nil || m.ImportedAlias != "" || declared[m.GoTypeName] {
+			continue
+		}
+		if (op.Action == ir.ActionSend && !publishers) || (op.Action == ir.ActionReceive && !subscribers) {
+			continue
+		}
+		if m.PayloadIsRef {
+			return fmt.Errorf("message %q: its payload schema %s is a $ref to another schema, so go-jsonschema generates that schema's type and no type %s; point the payload's $ref at the referenced schema instead", m.Name, m.GoTypeName, m.GoTypeName)
+		}
+		return fmt.Errorf("message %q: the generated code has no type %s for its payload", m.Name, m.GoTypeName)
 	}
 	return nil
 }

@@ -510,8 +510,9 @@ func lowerMessage(specPath, name string, raw *loader.Message, messagePackages []
 		return nil, fmt.Errorf("payload schema %s has no `title` (required so the Go type name matches go-jsonschema's --struct-name-from-title)", abs)
 	}
 	return &ir.Message{
-		Name:       name,
-		GoTypeName: s.Title,
+		Name:         name,
+		GoTypeName:   s.Title,
+		PayloadIsRef: s.Ref != "",
 	}, nil
 }
 

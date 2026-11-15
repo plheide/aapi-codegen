@@ -299,6 +299,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **No topology.** Generated code doesn't declare queues or exchanges.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
 - **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Put them in an `allOf` beside the `$ref` instead.
+- **A payload schema that is a `$ref`.** If the schema a payload refers to, a file or a `components.schemas` entry, is itself a `$ref` to another schema, go-jsonschema generates only that other schema's type. The generator then stops with an error, unless both schemas have the same `title`. Point the payload's `$ref` at the other schema instead.
 - **Imported type names.** An imported message's Go type name is the producer's message key; see [Consuming another service's messages](#consuming-another-services-messages).
 
 ## Development
