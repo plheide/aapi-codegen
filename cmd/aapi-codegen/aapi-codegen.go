@@ -44,8 +44,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "aapi-codegen:", err)
 		os.Exit(1)
 	}
-	// go-jsonschema's warnings, such as a schema keyword the generated
-	// code doesn't check, go to stderr; they don't change the exit status.
+	// Warnings, such as about a schema keyword the generated code doesn't
+	// check, go to stderr; they don't change the exit status.
 	cfg.Warn = func(msg string) { fmt.Fprintln(os.Stderr, "aapi-codegen: warning:", msg) }
 
 	if _, err := codegen.Generate(flag.Arg(0), cfg); err != nil {

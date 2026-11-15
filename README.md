@@ -206,7 +206,7 @@ By default, the generated `UnmarshalJSON` methods enforce the schema:
 
 Invalid JSON fails at `json.Unmarshal` with an error that names the violation.
 
-Where the generated code doesn't check something the schema declares, such as `minProperties`, go-jsonschema reports it, and aapi-codegen prints the report to stderr:
+Where the generated code doesn't check something the schema declares, such as `minProperties`, aapi-codegen prints a warning to stderr:
 
 ```text
 aapi-codegen: warning: schema fidelity: type OrderPlaced does not enforce all it declares: minProperties not checked
@@ -298,7 +298,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
-- **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Beside a message payload's own `$ref`, they're dropped without a warning. Put them in an `allOf` beside the `$ref` instead.
+- **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Put them in an `allOf` beside the `$ref` instead.
 - **Imported type names.** An imported message's Go type name is the producer's message key; see [Consuming another service's messages](#consuming-another-services-messages).
 
 ## Development
