@@ -1,0 +1,30 @@
+// Runtime assertions for typed-enum channel parameters with validation
+// omitted: the type, its values function and Valid are generated, but
+// the Publisher doesn't check the value it is given.
+
+package enumparamsv1
+
+import (
+	"context"
+	"testing"
+)
+
+type recPub struct{ routingKey string }
+
+func (r *recPub) Publish(_ context.Context, _, routingKey string, _ []byte, _ PublishProperties) error {
+	r.routingKey = routingKey
+	return nil
+}
+
+func TestSendJob_PassesAnyValueWithoutValidation(t *testing.T) {
+	if JobType("bogus").Valid() {
+		t.Error(`JobType("bogus").Valid() = true`)
+	}
+	tr := &recPub{}
+	if err := NewPublisher(tr).SendJob(context.Background(), "acme", JobType("bogus"), JobMessage{ID: "j-1"}); err != nil {
+		t.Fatalf("SendJob: %v", err)
+	}
+	if tr.routingKey != "acme.bogus" {
+		t.Errorf("routingKey = %q, want acme.bogus", tr.routingKey)
+	}
+}

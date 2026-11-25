@@ -107,6 +107,11 @@ func (p *Publisher) {{.GoFuncName}}(
 	msg {{.Message.QualifiedGoType}},
 	opts ...SendOption,
 ) error {
+{{- range .Channel.Address.Params }}{{ if .Checked }}
+	if !{{.GoArgName}}.Valid() {
+		return fmt.Errorf("parameter {{.JSONName}}: %q is not a valid {{.GoType}}", string({{.GoArgName}}))
+	}
+{{- end }}{{ end }}
 	props := PublishProperties{
 {{- if .Defaults }}
 {{- if .Defaults.ContentType }}

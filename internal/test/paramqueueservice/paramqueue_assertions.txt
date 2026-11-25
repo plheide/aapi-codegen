@@ -7,6 +7,7 @@ package paramqueuev1
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +53,16 @@ func TestSubscribeArchiveEvent_QueueNameUsesTypedRegion(t *testing.T) {
 	}
 	if want := []string{"eu.acme.orders.archived"}; !slices.Equal(tr.keys, want) {
 		t.Errorf("binding keys = %q, want %q", tr.keys, want)
+	}
+}
+
+func TestSubscribeArchiveEvent_RejectsUnknownRegion(t *testing.T) {
+	tr := &recordingTransport{}
+	err := NewSubscriber(tr).SubscribeArchiveEvent(context.Background(), Region("apac"), "acme", archiveHandler{})
+	if err == nil || !strings.Contains(err.Error(), `parameter region: "apac" is not a valid Region`) {
+		t.Fatalf("SubscribeArchiveEvent error = %v, want one naming the parameter", err)
+	}
+	if tr.queue != "" {
+		t.Errorf("subscribed to %q", tr.queue)
 	}
 }

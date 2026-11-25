@@ -19,9 +19,7 @@ channels:
         description: Tenant identifier.
       jobType:
         description: Job type (closed enum, drives queue routing).
-        schema:
-          type: string
-          enum: [build, deploy, rollback]
+        enum: [build, deploy, rollback]
     bindings:
       amqp:
         is: routingKey
@@ -47,9 +45,7 @@ channels:
     parameters:
       jobType:
         description: Job type — same enum as jobDispatch.
-        schema:
-          type: string
-          enum: [build, deploy, rollback]
+        enum: [build, deploy, rollback]
     bindings:
       amqp:
         is: queue

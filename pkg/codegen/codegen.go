@@ -72,11 +72,12 @@ type Config struct {
 	// OR-merged with the spec extension equivalents. v0.2+.
 	OmitPublishers  bool
 	OmitSubscribers bool
-	// Warn, when set, receives each warning about a schema keyword the
-	// generated code doesn't check: those go-jsonschema reports while it
-	// generates the payload types, and aapi-codegen's own about keywords
-	// beside a message payload's $ref. Nil discards them. Warnings don't
-	// make Generate fail.
+	// Warn, when set, receives each warning: go-jsonschema's about a
+	// schema keyword the generated code doesn't check, reported while
+	// it generates the payload types, and aapi-codegen's own about
+	// keywords beside a message payload's $ref and about channel
+	// parameters declared in the AsyncAPI 2.x shape. Nil discards them.
+	// Warnings don't make Generate fail.
 	Warn func(msg string)
 }
 
@@ -103,10 +104,14 @@ func Generate(specPath string, cfg Config) (string, error) {
 	if err := doc.ResolveMessageRefs(); err != nil {
 		return "", fmt.Errorf("resolve component message refs: %w", err)
 	}
-	// A payload's own $ref is resolved here, not by go-jsonschema, so
-	// the keywords beside it are reported here too.
+	// go-jsonschema never sees a payload's own $ref, which is resolved
+	// here, or the channel parameters, so what they leave unchecked or
+	// declare the 2.x way is reported here.
 	if cfg.Warn != nil {
 		for _, w := range payloadRefSiblingWarnings(doc) {
+			cfg.Warn(w)
+		}
+		for _, w := range parameterSchemaWarnings(doc) {
 			cfg.Warn(w)
 		}
 	}

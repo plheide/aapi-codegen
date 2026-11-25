@@ -97,8 +97,7 @@ channels:
     address: '{shardID}'
     parameters:
       shardID:
-        schema:
-          type: string
+        x-aapi-codegen:
           pattern: '^shard-\d{5}$'
     bindings:
       amqp:

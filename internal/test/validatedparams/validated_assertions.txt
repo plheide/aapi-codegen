@@ -121,3 +121,37 @@ type resultHandlerAdapter func(ctx context.Context, msg ResultMessage) error
 func (a resultHandlerAdapter) HandleResultMessage(ctx context.Context, msg ResultMessage) error {
 	return a(ctx, msg)
 }
+
+func TestShardID_Valid(t *testing.T) {
+	if !MustShardID("shard-00001").Valid() {
+		t.Error(`ShardID "shard-00001" is not Valid`)
+	}
+	if ShardID("shard-1").Valid() {
+		t.Error(`ShardID "shard-1" is Valid`)
+	}
+}
+
+// TestSendPartition_RejectsInvalidShardID: a ShardID made by conversion
+// skips NewShardID, so SendPartition checks it, and publishes nothing.
+func TestSendPartition_RejectsInvalidShardID(t *testing.T) {
+	tr := &recPub{}
+	err := NewPublisher(tr).SendPartition(context.Background(), ShardID("shard-1"), "nightly-report-1", PartitionMessage{ID: "p-1"})
+	if err == nil || !strings.Contains(err.Error(), `parameter shardID: "shard-1" is not a valid ShardID`) {
+		t.Fatalf("SendPartition error = %v, want one naming the parameter", err)
+	}
+	if tr.routingKey != "" {
+		t.Errorf("published to %q", tr.routingKey)
+	}
+}
+
+func TestSubscribeResultMessage_RejectsInvalidShardID(t *testing.T) {
+	tr := &recSub{}
+	h := resultHandlerAdapter(func(context.Context, ResultMessage) error { return nil })
+	err := NewSubscriber(tr).SubscribeResultMessage(context.Background(), ShardID("shard-1"), h)
+	if err == nil || !strings.Contains(err.Error(), `parameter shardID: "shard-1" is not a valid ShardID`) {
+		t.Fatalf("SubscribeResultMessage error = %v, want one naming the parameter", err)
+	}
+	if tr.queue != "" {
+		t.Errorf("subscribed to %q", tr.queue)
+	}
+}

@@ -15,8 +15,7 @@ channels:
     parameters:
       shardID:
         description: Shard ID (regex-validated).
-        schema:
-          type: string
+        x-aapi-codegen:
           pattern: '^shard-\d{5}$'
       workflowName:
         # No pattern → stays as plain `string`.
@@ -46,8 +45,7 @@ channels:
     parameters:
       shardID:
         description: Shard ID — same shape as above.
-        schema:
-          type: string
+        x-aapi-codegen:
           pattern: '^shard-\d{5}$'
     bindings:
       amqp:
