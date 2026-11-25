@@ -215,9 +215,9 @@ type AddressPart struct {
 func (p AddressPart) IsParam() bool { return p.Param != "" }
 
 // AddressParam is a typed view of one channel-address parameter as it
-// surfaces on the generated Publisher method signature. Today every
-// parameter is `string`; future work can derive types from the
-// AsyncAPI parameter schema.
+// surfaces on the generated Publisher and Subscriber method signatures.
+// It is `string` unless the spec gives the parameter an enum or a
+// pattern, which make it a named type.
 type AddressParam struct {
 	// JSONName is the parameter name as it appears in the spec
 	// address template, e.g. "tenant".
@@ -226,9 +226,14 @@ type AddressParam struct {
 	// Equal to JSONName today; reserved for future name-mangling
 	// (reserved-keyword escaping etc.).
 	GoArgName string
-	// GoType is the Go type emitted in the function signature; "string"
-	// for v1.
+	// GoType is the Go type emitted in the function signature: "string",
+	// or the enum or pattern type the lowerer registered.
 	GoType string
+	// Checked marks a typed parameter whose value the generated method
+	// checks with the type's Valid method before it publishes or
+	// subscribes: an enum unless validation is omitted, and a pattern,
+	// which is typed only when validation isn't omitted.
+	Checked bool
 }
 
 // Binding is the marker interface for protocol-specific channel

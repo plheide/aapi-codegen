@@ -98,21 +98,25 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 		wantType       string   // the parameter's Go type
 		wantValues     []string // the values of the enum named wantType, if any
 		wantPattern    string   // the pattern of the type named wantType, if any
+		wantChecked    bool     // whether Send and Subscribe check the value
 	}{
 		"3.x enum": {
-			param:      &loader.Parameter{Enum: []any{"eu", "us"}},
-			wantType:   "Region",
-			wantValues: []string{"eu", "us"},
+			param:       &loader.Parameter{Enum: []any{"eu", "us"}},
+			wantType:    "Region",
+			wantValues:  []string{"eu", "us"},
+			wantChecked: true,
 		},
 		"2.x schema.enum": {
-			param:      &loader.Parameter{Schema: map[string]any{"type": "string", "enum": []any{"eu", "us"}}},
-			wantType:   "Region",
-			wantValues: []string{"eu", "us"},
+			param:       &loader.Parameter{Schema: map[string]any{"type": "string", "enum": []any{"eu", "us"}}},
+			wantType:    "Region",
+			wantValues:  []string{"eu", "us"},
+			wantChecked: true,
 		},
 		"both, where the 3.x enum wins": {
-			param:      &loader.Parameter{Enum: []any{"eu", "us"}, Schema: map[string]any{"type": "string", "enum": []any{"apac"}}},
-			wantType:   "Region",
-			wantValues: []string{"eu", "us"},
+			param:       &loader.Parameter{Enum: []any{"eu", "us"}, Schema: map[string]any{"type": "string", "enum": []any{"apac"}}},
+			wantType:    "Region",
+			wantValues:  []string{"eu", "us"},
+			wantChecked: true,
 		},
 		"an enum of numbers": {
 			param:    &loader.Parameter{Enum: []any{1, 2}},
@@ -126,21 +130,25 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 			param:       &loader.Parameter{XAAPICodegen: pattern},
 			wantType:    "Region",
 			wantPattern: "^[a-z]+$",
+			wantChecked: true,
 		},
 		"2.x schema.pattern": {
 			param:       &loader.Parameter{Schema: map[string]any{"type": "string", "pattern": "^[a-z]+$"}},
 			wantType:    "Region",
 			wantPattern: "^[a-z]+$",
+			wantChecked: true,
 		},
 		"both patterns, where x-aapi-codegen wins": {
 			param:       &loader.Parameter{XAAPICodegen: pattern, Schema: map[string]any{"type": "string", "pattern": "^[0-9]+$"}},
 			wantType:    "Region",
 			wantPattern: "^[a-z]+$",
+			wantChecked: true,
 		},
 		"an enum and a pattern, where the enum wins": {
-			param:      &loader.Parameter{Enum: []any{"eu", "us"}, XAAPICodegen: pattern},
-			wantType:   "Region",
-			wantValues: []string{"eu", "us"},
+			param:       &loader.Parameter{Enum: []any{"eu", "us"}, XAAPICodegen: pattern},
+			wantType:    "Region",
+			wantValues:  []string{"eu", "us"},
+			wantChecked: true,
 		},
 		"a pattern under omit-validation": {
 			param:          &loader.Parameter{XAAPICodegen: pattern},
@@ -185,6 +193,9 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 			}
 			if gotPattern != c.wantPattern {
 				t.Errorf("pattern = %q, want %q", gotPattern, c.wantPattern)
+			}
+			if got := ch.Address.Params[0].Checked; got != c.wantChecked {
+				t.Errorf("Checked = %v, want %v", got, c.wantChecked)
 			}
 		})
 	}

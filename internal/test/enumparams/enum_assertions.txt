@@ -4,6 +4,8 @@ package enumparamsv1
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -89,13 +91,65 @@ func TestJobTypeConstants_HaveExpectedValues(t *testing.T) {
 	}
 }
 
-// TestTenantStaysString proves that parameters WITHOUT a schema
-// declaration keep the v0.1.x default `string` Go type — v0.4 only
-// types params that explicitly declared an enum schema.
+// TestTenantStaysString proves that parameters without an enum or a
+// pattern keep the default `string` Go type.
 func TestTenantStaysString(t *testing.T) {
 	// The arg type appears in the function signature; a compile-time
 	// check is enough — if SendJob's tenant arg had been typed, this
 	// call would fail to compile (we're passing a plain string literal).
 	tr := &recPub{}
 	_ = NewPublisher(tr).SendJob(context.Background(), "acme-tenant", JobTypeBuild, JobMessage{ID: "x"})
+}
+
+// TestJobTypeValues_InSpecOrder checks the generated values function,
+// and that it returns a new slice each time.
+func TestJobTypeValues_InSpecOrder(t *testing.T) {
+	got := JobTypeValues()
+	if want := []JobType{JobTypeBuild, JobTypeDeploy, JobTypeRollback}; !slices.Equal(got, want) {
+		t.Errorf("JobTypeValues() = %q, want %q", got, want)
+	}
+	got[0] = "changed"
+	if JobTypeValues()[0] != JobTypeBuild {
+		t.Error("JobTypeValues returns a slice its caller can change")
+	}
+}
+
+func TestJobType_Valid(t *testing.T) {
+	for _, v := range JobTypeValues() {
+		if !v.Valid() {
+			t.Errorf("%q.Valid() = false", v)
+		}
+	}
+	for _, v := range []JobType{"", "bogus", "Build"} {
+		if v.Valid() {
+			t.Errorf("%q.Valid() = true", v)
+		}
+	}
+}
+
+// TestSendJob_RejectsValueOutsideTheEnum: a JobType made by conversion
+// compiles, so SendJob checks it, and publishes nothing.
+func TestSendJob_RejectsValueOutsideTheEnum(t *testing.T) {
+	tr := &recPub{}
+	err := NewPublisher(tr).SendJob(context.Background(), "acme", JobType("bogus"), JobMessage{ID: "j-1"})
+	if err == nil || !strings.Contains(err.Error(), `parameter jobType: "bogus" is not a valid JobType`) {
+		t.Fatalf("SendJob error = %v, want one naming the parameter", err)
+	}
+	if tr.routingKey != "" {
+		t.Errorf("published to %q", tr.routingKey)
+	}
+}
+
+// TestSubscribeJobResult_RejectsValueOutsideTheEnum: Subscribe checks
+// the value too, before it binds anything.
+func TestSubscribeJobResult_RejectsValueOutsideTheEnum(t *testing.T) {
+	tr := &recSub{}
+	h := jrHandlerAdapter(func(context.Context, JobResult) error { return nil })
+	err := NewSubscriber(tr).SubscribeJobResult(context.Background(), JobType("bogus"), h)
+	if err == nil || !strings.Contains(err.Error(), `parameter jobType: "bogus" is not a valid JobType`) {
+		t.Fatalf("SubscribeJobResult error = %v, want one naming the parameter", err)
+	}
+	if tr.queue != "" {
+		t.Errorf("subscribed to %q", tr.queue)
+	}
 }

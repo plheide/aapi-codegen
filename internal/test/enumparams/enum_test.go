@@ -1,7 +1,8 @@
-// Package enumparams_test is the v0.4 acceptance test for typed
-// channel parameters: parameters with `schema.type: string` + an
-// `enum` list lower to typed Go enum types, dedupe across channels,
-// and surface in both Publisher and Subscriber signatures.
+// Package enumparams_test is the acceptance test for typed channel
+// parameters: parameters with an `enum` list lower to typed Go enum
+// types, dedupe across channels, and surface in both Publisher and
+// Subscriber signatures, which check the value unless validation is
+// omitted.
 package enumparams_test
 
 import (
@@ -65,6 +66,54 @@ func TestV04_TypedEnumParameters(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "go.mod"),
 		[]byte("module aapicodegen_v04_test\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatalf("write tmp go.mod: %v", err)
+	}
+	runGo(t, tmp, []string{"test", "./..."})
+}
+
+// TestEnumParameters_OmitValidation: with validation omitted, the enum
+// type, its values function and Valid are still generated, but SendJob
+// doesn't check the value.
+func TestEnumParameters_OmitValidation(t *testing.T) {
+	repoRoot := repoRootFromTestDir(t)
+	tmp := t.TempDir()
+	outFile := filepath.Join(tmp, "enumparamsv1.gen.go")
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configFile, []byte("omit-validation: true\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	runGo(t, repoRoot, []string{
+		"run", "./cmd/aapi-codegen",
+		"-package", "enumparamsv1",
+		"-config", configFile,
+		"-o", outFile,
+		"internal/test/enumparams/enumparamsv1.source.asyncapi.yaml",
+	})
+
+	src, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read generated file: %v", err)
+	}
+	body := string(src)
+	for _, want := range []string{"type JobType string", "func JobTypeValues() []JobType", "func (v JobType) Valid() bool"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("generated file missing %q\n--- file ---\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "if !jobType.Valid()") {
+		t.Errorf("omit-validation should drop the parameter check:\n%s", body)
+	}
+
+	assertions, err := os.ReadFile("enum_omit_assertions.txt")
+	if err != nil {
+		t.Fatalf("read enum_omit_assertions.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "enum_test.go"), assertions, 0o600); err != nil {
+		t.Fatalf("write enum_test.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "go.mod"),
+		[]byte("module aapicodegen_v04_omit_test\n\ngo 1.26\n"), 0o600); err != nil {
 		t.Fatalf("write tmp go.mod: %v", err)
 	}
 	runGo(t, tmp, []string{"test", "./..."})

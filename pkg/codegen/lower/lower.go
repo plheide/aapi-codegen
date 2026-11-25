@@ -165,6 +165,7 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
 			}
 			addr.Params[i].GoType = typeName
+			addr.Params[i].Checked = !omitValidation
 			continue
 		}
 		if omitValidation {
@@ -175,6 +176,7 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
 			}
 			addr.Params[i].GoType = typeName
+			addr.Params[i].Checked = true
 		}
 	}
 	return &ir.Channel{

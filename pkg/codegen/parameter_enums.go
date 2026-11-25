@@ -41,6 +41,25 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 			fmt.Fprintf(&b, "\t%s%s %s = %q\n", e.GoTypeName, pascalizeEnumValue(v), e.GoTypeName, v)
 		}
 		b.WriteString(")\n\n")
+		fmt.Fprintf(&b, "// %sValues returns every %s value, in the order the spec lists them.\n", e.GoTypeName, e.GoTypeName)
+		fmt.Fprintf(&b, "func %sValues() []%s {\n", e.GoTypeName, e.GoTypeName)
+		fmt.Fprintf(&b, "\treturn []%s{\n", e.GoTypeName)
+		for _, v := range e.Values {
+			fmt.Fprintf(&b, "\t\t%s%s,\n", e.GoTypeName, pascalizeEnumValue(v))
+		}
+		b.WriteString("\t}\n}\n\n")
+		fmt.Fprintf(&b, "// Valid reports whether v is one of the %s values. A conversion such\n", e.GoTypeName)
+		fmt.Fprintf(&b, "// as %s(s) compiles for any string, so the Publisher and Subscriber\n", e.GoTypeName)
+		fmt.Fprintf(&b, "// methods that take a %s check it, unless the spec omits validation.\n", e.GoTypeName)
+		fmt.Fprintf(&b, "func (v %s) Valid() bool {\n", e.GoTypeName)
+		b.WriteString("\tswitch v {\n\tcase ")
+		for i, v := range e.Values {
+			if i > 0 {
+				b.WriteString(",\n\t\t")
+			}
+			fmt.Fprintf(&b, "%s%s", e.GoTypeName, pascalizeEnumValue(v))
+		}
+		b.WriteString(":\n\t\treturn true\n\t}\n\treturn false\n}\n\n")
 	}
 	for _, p := range spec.ParameterPatterns {
 		varName := lowercaseFirst(p.GoTypeName) + "Pattern"
@@ -50,9 +69,9 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 		fmt.Fprintf(&b, "// compile-time-known constants such as tests or boot-time config).\n")
 		fmt.Fprintf(&b, "type %s string\n\n", p.GoTypeName)
 		fmt.Fprintf(&b, "var %s = regexp.MustCompile(%s)\n\n", varName, backtickQuote(p.Pattern))
-		fmt.Fprintf(&b, "// New%s validates v against the spec's pattern and returns a typed\n", p.GoTypeName)
-		fmt.Fprintf(&b, "// value on success. Validate input at construction time; the typed\n")
-		fmt.Fprintf(&b, "// value flows through Publisher / Subscriber unchecked from there.\n")
+		fmt.Fprintf(&b, "// New%s checks v against the spec's pattern and returns it as a\n", p.GoTypeName)
+		fmt.Fprintf(&b, "// %s. A conversion such as %s(s) skips the check, but the\n", p.GoTypeName, p.GoTypeName)
+		fmt.Fprintf(&b, "// Publisher and Subscriber methods that take a %s check it again.\n", p.GoTypeName)
 		fmt.Fprintf(&b, "func New%s(v string) (%s, error) {\n", p.GoTypeName, p.GoTypeName)
 		fmt.Fprintf(&b, "\tif !%s.MatchString(v) {\n", varName)
 		fmt.Fprintf(&b, "\t\treturn \"\", fmt.Errorf(\"%s: %%q does not match pattern %%q\", v, %s.String())\n", p.GoTypeName, varName)
@@ -66,6 +85,10 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 		fmt.Fprintf(&b, "\tout, err := New%s(v)\n", p.GoTypeName)
 		fmt.Fprintf(&b, "\tif err != nil { panic(err) }\n")
 		fmt.Fprintf(&b, "\treturn out\n")
+		fmt.Fprintf(&b, "}\n\n")
+		fmt.Fprintf(&b, "// Valid reports whether v matches the spec's pattern.\n")
+		fmt.Fprintf(&b, "func (v %s) Valid() bool {\n", p.GoTypeName)
+		fmt.Fprintf(&b, "\treturn %s.MatchString(string(v))\n", varName)
 		fmt.Fprintf(&b, "}\n\n")
 	}
 	return b.String(), nil

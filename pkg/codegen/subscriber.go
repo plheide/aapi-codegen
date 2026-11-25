@@ -98,6 +98,11 @@ func (s *Subscriber) {{.GoFuncName}}(
 {{- end }}
 	handler {{.HandlerTypeName}},
 ) error {
+{{- range .Channel.Address.Params }}{{ if .Checked }}
+	if !{{.GoArgName}}.Valid() {
+		return fmt.Errorf("parameter {{.JSONName}}: %q is not a valid {{.GoType}}", string({{.GoArgName}}))
+	}
+{{- end }}{{ end }}
 	queueName := {{.Queue.NameExprGo}}
 	bindingKeys := []string{ {{.BindingKeysExprGo}} }
 	return s.transport.Subscribe(ctx, queueName, bindingKeys, func(ctx context.Context, routingKey string, body []byte) error {
