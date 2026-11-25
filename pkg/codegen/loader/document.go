@@ -119,13 +119,19 @@ type Channel struct {
 	Messages    map[string]*Message   `yaml:"messages,omitempty"`
 }
 
+// Parameter is an AsyncAPI 3.x Parameter Object,
+// `channels.X.parameters.Y`.
 type Parameter struct {
 	Description string `yaml:"description,omitempty"`
-	// Schema is the parameter's typed schema fragment per AsyncAPI 3.x
-	// `channels.X.parameters.Y.schema`. v0.4 reads `type` and `enum`
-	// from here to derive typed Go enum types for the Publisher /
-	// Subscriber signature. Other JSON-Schema fields (pattern, format)
-	// are preserved in the raw map for future runtime validation.
+	// Enum lists the values the parameter may take. A list of strings
+	// makes the parameter a Go enum type in the Publisher and Subscriber
+	// signatures.
+	Enum []any `yaml:"enum,omitempty"`
+	// Schema is `channels.X.parameters.Y.schema`, the AsyncAPI 2.x
+	// shape, which a 3.x Parameter Object doesn't have: `asyncapi
+	// validate` rejects it. It is still read for specs written that
+	// way: a `type: string` with an `enum` or a `pattern` types the
+	// parameter, unless the parameter declares its own Enum.
 	Schema map[string]any `yaml:"schema,omitempty"`
 }
 

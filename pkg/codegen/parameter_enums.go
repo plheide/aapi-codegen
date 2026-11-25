@@ -33,9 +33,8 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 	b.WriteString("\n")
 	for _, e := range spec.ParameterEnums {
 		fmt.Fprintf(&b, "// %s is the typed value for the AsyncAPI channel parameter\n", e.GoTypeName)
-		fmt.Fprintf(&b, "// declared with `schema.type: string` and an `enum` list — used as the\n")
-		fmt.Fprintf(&b, "// Go argument type on every Publisher / Subscriber method that takes\n")
-		fmt.Fprintf(&b, "// this parameter, so callers cannot pass an unrecognised value.\n")
+		fmt.Fprintf(&b, "// declared with an `enum` list. It is the Go argument type on every\n")
+		fmt.Fprintf(&b, "// Publisher / Subscriber method that takes this parameter.\n")
 		fmt.Fprintf(&b, "type %s string\n\n", e.GoTypeName)
 		b.WriteString("const (\n")
 		for _, v := range e.Values {

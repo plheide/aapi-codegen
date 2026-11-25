@@ -1,8 +1,12 @@
 package lower
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/plheide/aapi-codegen/pkg/codegen/ir"
+	"github.com/plheide/aapi-codegen/pkg/codegen/loader"
 )
 
 // TestLowerAMQPBinding_ErrorMessages locks down each of the three
@@ -70,5 +74,74 @@ func TestLowerAMQPBinding_HappyPath(t *testing.T) {
 	}
 	if b.BindingVersion != "0.3.0" {
 		t.Errorf("BindingVersion: got %q, want 0.3.0", b.BindingVersion)
+	}
+}
+
+// routingKeyBindings is a minimal valid AMQP channel binding.
+var routingKeyBindings = map[string]any{
+	"amqp": map[string]any{
+		"is":             "routingKey",
+		"exchange":       map[string]any{"name": "Orders", "type": "direct"},
+		"bindingVersion": "0.3.0",
+	},
+}
+
+// TestLowerChannel_ParameterTypes covers where a parameter's Go type
+// comes from: the AsyncAPI 3.x `enum` on the parameter, or the 2.x
+// `schema.enum`, which a 3.x document can't have but older specs use.
+func TestLowerChannel_ParameterTypes(t *testing.T) {
+	for name, c := range map[string]struct {
+		param      *loader.Parameter
+		wantType   string   // the parameter's Go type
+		wantValues []string // the values of the enum named wantType, if any
+	}{
+		"3.x enum": {
+			param:      &loader.Parameter{Enum: []any{"eu", "us"}},
+			wantType:   "Region",
+			wantValues: []string{"eu", "us"},
+		},
+		"2.x schema.enum": {
+			param:      &loader.Parameter{Schema: map[string]any{"type": "string", "enum": []any{"eu", "us"}}},
+			wantType:   "Region",
+			wantValues: []string{"eu", "us"},
+		},
+		"both, where the 3.x enum wins": {
+			param:      &loader.Parameter{Enum: []any{"eu", "us"}, Schema: map[string]any{"type": "string", "enum": []any{"apac"}}},
+			wantType:   "Region",
+			wantValues: []string{"eu", "us"},
+		},
+		"an enum of numbers": {
+			param:    &loader.Parameter{Enum: []any{1, 2}},
+			wantType: "string",
+		},
+		"no enum": {
+			param:    &loader.Parameter{Description: "Region."},
+			wantType: "string",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := &loader.Channel{
+				Address:    "orders.{region}",
+				Parameters: map[string]*loader.Parameter{"region": c.param},
+				Bindings:   routingKeyBindings,
+			}
+			spec := &ir.Spec{}
+			ch, err := lowerChannel("orders", raw, spec, false)
+			if err != nil {
+				t.Fatalf("lowerChannel: %v", err)
+			}
+			if got := ch.Address.Params[0].GoType; got != c.wantType {
+				t.Errorf("GoType = %q, want %q", got, c.wantType)
+			}
+			var gotValues []string
+			for _, e := range spec.ParameterEnums {
+				if e.GoTypeName == c.wantType {
+					gotValues = e.Values
+				}
+			}
+			if !slices.Equal(gotValues, c.wantValues) {
+				t.Errorf("enum values = %q, want %q", gotValues, c.wantValues)
+			}
+		})
 	}
 }

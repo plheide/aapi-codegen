@@ -146,9 +146,10 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 	if err != nil {
 		return nil, err
 	}
-	// v0.4 / v0.4.1: walk each address parameter; if the spec declares
-	// an enum or pattern schema for it, override the AddressParam's
-	// GoType and register the type globally on the spec. Enum wins over
+	// Walk each address parameter; if the spec declares an enum or a
+	// pattern for it, override the AddressParam's GoType and register
+	// the type globally on the spec. The enum is the parameter's own
+	// AsyncAPI 3.x `enum`, or else the 2.x `schema.enum`. Enum wins over
 	// pattern (a closed enum makes the pattern redundant); pattern
 	// wrapping is skipped entirely when omitValidation is on.
 	for i, p := range addr.Params {
@@ -157,7 +158,7 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 			continue
 		}
 		typeName := pascalize(p.JSONName)
-		if enum, ok := parameterEnum(paramDef.Schema); ok {
+		if enum, ok := parameterEnumValues(paramDef); ok {
 			if err := registerParameterEnum(spec, typeName, enum); err != nil {
 				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
 			}
@@ -228,6 +229,17 @@ func registerParameterPattern(spec *ir.Spec, typeName, pattern string) error {
 	return nil
 }
 
+// parameterEnumValues returns the values of a parameter's enum: its
+// AsyncAPI 3.x `enum` where it declares one, or else the 2.x
+// `schema.enum`. It returns (nil, false) where that list is empty or
+// holds anything but strings, and the parameter stays a plain string.
+func parameterEnumValues(p *loader.Parameter) ([]string, bool) {
+	if len(p.Enum) > 0 {
+		return stringValues(p.Enum)
+	}
+	return parameterEnum(p.Schema)
+}
+
 // parameterEnum returns the string-enum values declared on a parameter
 // schema, or (nil, false) if the schema isn't `{type: string, enum: [...]}`.
 // $ref-based schemas are deliberately not followed — v0.4 only handles
@@ -239,12 +251,18 @@ func parameterEnum(schema map[string]any) ([]string, bool) {
 	if t, _ := schema["type"].(string); t != "string" {
 		return nil, false
 	}
-	rawList, ok := schema["enum"].([]any)
-	if !ok || len(rawList) == 0 {
+	rawList, _ := schema["enum"].([]any)
+	return stringValues(rawList)
+}
+
+// stringValues returns list as strings, or (nil, false) if it is empty
+// or holds anything but strings.
+func stringValues(list []any) ([]string, bool) {
+	if len(list) == 0 {
 		return nil, false
 	}
-	out := make([]string, 0, len(rawList))
-	for _, v := range rawList {
+	out := make([]string, 0, len(list))
+	for _, v := range list {
 		s, ok := v.(string)
 		if !ok {
 			return nil, false

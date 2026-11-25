@@ -49,9 +49,7 @@ channels:
     parameters:
       region:
         description: Region the orders were archived in.
-        schema:
-          type: string
-          enum: [eu, us]
+        enum: [eu, us]
       tenant: { description: Tenant id. }
     bindings:
       amqp:

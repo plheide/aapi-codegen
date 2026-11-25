@@ -13,7 +13,7 @@ AsyncAPI 3.x → Go code generator, the AsyncAPI counterpart to [oapi-codegen](h
 - **Payload types** for every message, with `UnmarshalJSON` methods that enforce the schema ([Validation](#validation)).
 - **A Publisher** with one method per `action: send` operation, named after the operation key: `sendOrder` becomes `SendOrder(ctx, ...params, msg, opts ...SendOption) error`. The spec's AMQP bindings set the default message properties; `SendOption`s override them per call.
 - **A Subscriber** with a `<Msg>Handler` interface and a `Subscribe<Msg>(ctx, ...params, handler) error` method per `action: receive` operation. Several receive operations on one queue share a single `Subscribe<Queue>` method that dispatches by routing key.
-- **Typed channel parameters.** A string `enum` becomes `type X string` with one constant per value (`JobTypeBuild`). A string `pattern` becomes `type X string` with `NewX` / `MustX` constructors that check the pattern.
+- **Typed channel parameters.** A parameter's `enum` becomes `type X string` with one constant per value (`JobTypeBuild`). A string `pattern` becomes `type X string` with `NewX` / `MustX` constructors that check the pattern.
 
 The generated package doesn't import an AMQP client. You implement two small interfaces, `Transport` and `SubscribeTransport`, around the client you use, such as `amqp091-go`.
 
@@ -259,7 +259,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - [x] `info.title` (used in the generated doc comments)
 - [x] `channels`
   - [x] `address`: literal (`widget.cancellation`) or templated (`{tenant}.{widgetType}`)
-  - [x] `parameters`: `string` by default, typed from `schema.type: string` with `enum` or `pattern`
+  - [x] `parameters`: `string` by default, typed from the parameter's `enum`, or from `schema.type: string` with `pattern`
   - [x] `messages`, including several per channel
   - [x] `bindings.amqp`
 - [x] `operations`
