@@ -45,7 +45,7 @@ func RenderParameterEnums(spec *ir.Spec) (string, error) {
 	for _, p := range spec.ParameterPatterns {
 		varName := lowercaseFirst(p.GoTypeName) + "Pattern"
 		fmt.Fprintf(&b, "// %s is the typed value for the AsyncAPI channel parameter\n", p.GoTypeName)
-		fmt.Fprintf(&b, "// declared with `schema.pattern: %s`. Construct via New%s\n", goCommentEscape(p.Pattern), p.GoTypeName)
+		fmt.Fprintf(&b, "// declared with the pattern `%s`. Construct via New%s\n", goCommentEscape(p.Pattern), p.GoTypeName)
 		fmt.Fprintf(&b, "// (returns an error on pattern mismatch) or Must%s (panics — for\n", p.GoTypeName)
 		fmt.Fprintf(&b, "// compile-time-known constants such as tests or boot-time config).\n")
 		fmt.Fprintf(&b, "type %s string\n\n", p.GoTypeName)

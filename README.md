@@ -13,7 +13,7 @@ AsyncAPI 3.x → Go code generator, the AsyncAPI counterpart to [oapi-codegen](h
 - **Payload types** for every message, with `UnmarshalJSON` methods that enforce the schema ([Validation](#validation)).
 - **A Publisher** with one method per `action: send` operation, named after the operation key: `sendOrder` becomes `SendOrder(ctx, ...params, msg, opts ...SendOption) error`. The spec's AMQP bindings set the default message properties; `SendOption`s override them per call.
 - **A Subscriber** with a `<Msg>Handler` interface and a `Subscribe<Msg>(ctx, ...params, handler) error` method per `action: receive` operation. Several receive operations on one queue share a single `Subscribe<Queue>` method that dispatches by routing key.
-- **Typed channel parameters.** A parameter's `enum` becomes `type X string` with one constant per value (`JobTypeBuild`). A string `pattern` becomes `type X string` with `NewX` / `MustX` constructors that check the pattern.
+- **Typed channel parameters.** A parameter's `enum` becomes `type X string` with one constant per value (`JobTypeBuild`). A `pattern` in the parameter's `x-aapi-codegen` becomes `type X string` with `NewX` / `MustX` constructors that check the pattern.
 
 The generated package doesn't import an AMQP client. You implement two small interfaces, `Transport` and `SubscribeTransport`, around the client you use, such as `amqp091-go`.
 
@@ -57,6 +57,7 @@ aapi-codegen reads its settings from an `x-aapi-codegen` extension in the spec, 
 | root `x-aapi-codegen` | `message-packages` | Maps a producer's spec file to its generated Go package. See [Consuming another service's messages](#consuming-another-services-messages). | v0.5 |
 | root `x-aapi-codegen` | `omit-validation` | No validating `UnmarshalJSON`; pattern-typed channel parameters fall back to `string`. | v0.1 |
 | root `x-aapi-codegen` | `omit-publishers`, `omit-subscribers` | Skips that part of the output, even when the spec has matching operations. | v0.2 |
+| channel parameter `x-aapi-codegen` | `pattern` | A regular expression (RE2) the parameter's values must match. The parameter becomes `type X string` with `NewX` / `MustX` constructors that check it, unless validation is omitted. | v0.13 |
 | channel `bindings.x-aapi-codegen` | `queue: {name, durable, autoDelete, exclusive}` | The queue a consumer reads from when the channel is in `is: routingKey` mode, where AMQP binding 0.3.0 forbids `bindings.amqp.queue`. If both are set, `bindings.amqp.queue` wins. | v0.5.1 |
 
 ```yaml
@@ -65,6 +66,20 @@ x-aapi-codegen:
     - id: https://schemas.example.com/common/v1/header.schema.json
       package: example.com/lib/schemas/common/v1
       alias: commonv1
+```
+
+A channel parameter is typed by its own `enum`, or by a `pattern` in its `x-aapi-codegen`:
+
+```yaml
+channels:
+  jobs:
+    address: 'jobs.{jobType}.{shardID}'
+    parameters:
+      jobType:
+        enum: [build, deploy]        # type JobType string; JobTypeBuild, JobTypeDeploy
+      shardID:
+        x-aapi-codegen:
+          pattern: '^shard-\d{5}$'   # type ShardID string; NewShardID, MustShardID
 ```
 
 The optional `-config` file accepts only `package`, `output`, `schema-packages`, `message-packages`, `omit-validation`, and `capitalization` (initialisms added to the default `ID` and `URL`); any other key is an error. `omit-publishers`, `omit-subscribers` and the `queue` binding work only in the spec. Either the spec or the config file can opt out of validation; neither overrides the other's opt-out.
@@ -243,7 +258,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 | [`consumerservice/`](internal/test/consumerservice/) | `action: receive`, `<Msg>Handler`, `Subscribe<Msg>`, `ErrDrop`, queue-mode channels |
 | [`bindingsservice/`](internal/test/bindingsservice/) | `SendOption`, message and operation AMQP bindings |
 | [`enumparams/`](internal/test/enumparams/) | enum-typed channel parameters, shared by publisher and subscriber |
-| [`validatedparams/`](internal/test/validatedparams/) | pattern-typed parameters with `NewX` / `MustX`; `omit-validation` falls back to `string` |
+| [`validatedparams/`](internal/test/validatedparams/) | pattern-typed parameters (`x-aapi-codegen.pattern`) with `NewX` / `MustX`; `omit-validation` falls back to `string` |
 | [`consumerimportservice/`](internal/test/consumerimportservice/) | a consumer importing its producer's message type through `message-packages` |
 | [`sharedqueueservice/`](internal/test/sharedqueueservice/) | a routing-key consumer whose queue name differs from the channel address |
 | [`multimessagequeueservice/`](internal/test/multimessagequeueservice/) | several receive operations on one queue, dispatched by routing key |
@@ -259,7 +274,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - [x] `info.title` (used in the generated doc comments)
 - [x] `channels`
   - [x] `address`: literal (`widget.cancellation`) or templated (`{tenant}.{widgetType}`)
-  - [x] `parameters`: `string` by default, typed from the parameter's `enum`, or from `schema.type: string` with `pattern`
+  - [x] `parameters`: `string` by default, typed from the parameter's `enum` or `x-aapi-codegen.pattern`
   - [x] `messages`, including several per channel
   - [x] `bindings.amqp`
 - [x] `operations`
@@ -297,6 +312,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **Shared-queue subscribers** need one exchange and fixed, distinct routing keys.
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.
+- **A parameter's `schema`.** A channel parameter's `schema`, the AsyncAPI 2.x form, is still read for its `enum` or `pattern`, with a warning: a 3.x document can't have it, and `asyncapi validate` rejects the spec. Declare `enum` on the parameter, or `x-aapi-codegen.pattern`, instead.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
 - **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Put them in an `allOf` beside the `$ref` instead.
 - **A payload schema that is a `$ref`.** If the schema a payload refers to, a file or a `components.schemas` entry, is itself a `$ref` to another schema, go-jsonschema generates only that other schema's type. The generator then stops with an error, unless both schemas have the same `title`. Point the payload's `$ref` at the other schema instead.

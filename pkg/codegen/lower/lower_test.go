@@ -87,13 +87,17 @@ var routingKeyBindings = map[string]any{
 }
 
 // TestLowerChannel_ParameterTypes covers where a parameter's Go type
-// comes from: the AsyncAPI 3.x `enum` on the parameter, or the 2.x
-// `schema.enum`, which a 3.x document can't have but older specs use.
+// comes from: the AsyncAPI 3.x `enum` on the parameter or a pattern in
+// its `x-aapi-codegen`, or the 2.x `schema` with an `enum` or a
+// `pattern`, which a 3.x document can't have but older specs use.
 func TestLowerChannel_ParameterTypes(t *testing.T) {
+	pattern := &loader.ParameterExtension{Pattern: "^[a-z]+$"}
 	for name, c := range map[string]struct {
-		param      *loader.Parameter
-		wantType   string   // the parameter's Go type
-		wantValues []string // the values of the enum named wantType, if any
+		param          *loader.Parameter
+		omitValidation bool
+		wantType       string   // the parameter's Go type
+		wantValues     []string // the values of the enum named wantType, if any
+		wantPattern    string   // the pattern of the type named wantType, if any
 	}{
 		"3.x enum": {
 			param:      &loader.Parameter{Enum: []any{"eu", "us"}},
@@ -118,6 +122,37 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 			param:    &loader.Parameter{Description: "Region."},
 			wantType: "string",
 		},
+		"x-aapi-codegen.pattern": {
+			param:       &loader.Parameter{XAAPICodegen: pattern},
+			wantType:    "Region",
+			wantPattern: "^[a-z]+$",
+		},
+		"2.x schema.pattern": {
+			param:       &loader.Parameter{Schema: map[string]any{"type": "string", "pattern": "^[a-z]+$"}},
+			wantType:    "Region",
+			wantPattern: "^[a-z]+$",
+		},
+		"both patterns, where x-aapi-codegen wins": {
+			param:       &loader.Parameter{XAAPICodegen: pattern, Schema: map[string]any{"type": "string", "pattern": "^[0-9]+$"}},
+			wantType:    "Region",
+			wantPattern: "^[a-z]+$",
+		},
+		"an enum and a pattern, where the enum wins": {
+			param:      &loader.Parameter{Enum: []any{"eu", "us"}, XAAPICodegen: pattern},
+			wantType:   "Region",
+			wantValues: []string{"eu", "us"},
+		},
+		"a pattern under omit-validation": {
+			param:          &loader.Parameter{XAAPICodegen: pattern},
+			omitValidation: true,
+			wantType:       "string",
+		},
+		"an enum under omit-validation": {
+			param:          &loader.Parameter{Enum: []any{"eu", "us"}},
+			omitValidation: true,
+			wantType:       "Region",
+			wantValues:     []string{"eu", "us"},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			raw := &loader.Channel{
@@ -126,7 +161,7 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 				Bindings:   routingKeyBindings,
 			}
 			spec := &ir.Spec{}
-			ch, err := lowerChannel("orders", raw, spec, false)
+			ch, err := lowerChannel("orders", raw, spec, c.omitValidation)
 			if err != nil {
 				t.Fatalf("lowerChannel: %v", err)
 			}
@@ -141,6 +176,15 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 			}
 			if !slices.Equal(gotValues, c.wantValues) {
 				t.Errorf("enum values = %q, want %q", gotValues, c.wantValues)
+			}
+			var gotPattern string
+			for _, p := range spec.ParameterPatterns {
+				if p.GoTypeName == c.wantType {
+					gotPattern = p.Pattern
+				}
+			}
+			if gotPattern != c.wantPattern {
+				t.Errorf("pattern = %q, want %q", gotPattern, c.wantPattern)
 			}
 		})
 	}

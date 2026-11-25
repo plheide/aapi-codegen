@@ -127,12 +127,23 @@ type Parameter struct {
 	// makes the parameter a Go enum type in the Publisher and Subscriber
 	// signatures.
 	Enum []any `yaml:"enum,omitempty"`
+	// XAAPICodegen is the parameter's `x-aapi-codegen` extension.
+	XAAPICodegen *ParameterExtension `yaml:"x-aapi-codegen,omitempty"`
 	// Schema is `channels.X.parameters.Y.schema`, the AsyncAPI 2.x
 	// shape, which a 3.x Parameter Object doesn't have: `asyncapi
 	// validate` rejects it. It is still read for specs written that
 	// way: a `type: string` with an `enum` or a `pattern` types the
-	// parameter, unless the parameter declares its own Enum.
+	// parameter, unless the parameter declares its own Enum, or its own
+	// pattern in XAAPICodegen.
 	Schema map[string]any `yaml:"schema,omitempty"`
+}
+
+// ParameterExtension is `channels.X.parameters.Y.x-aapi-codegen`.
+type ParameterExtension struct {
+	// Pattern is a regular expression (RE2) the parameter's values must
+	// match. Unless validation is omitted, it makes the parameter a Go
+	// type with constructors that check it.
+	Pattern string `yaml:"pattern,omitempty"`
 }
 
 type Message struct {

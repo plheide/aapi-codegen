@@ -149,9 +149,11 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 	// Walk each address parameter; if the spec declares an enum or a
 	// pattern for it, override the AddressParam's GoType and register
 	// the type globally on the spec. The enum is the parameter's own
-	// AsyncAPI 3.x `enum`, or else the 2.x `schema.enum`. Enum wins over
-	// pattern (a closed enum makes the pattern redundant); pattern
-	// wrapping is skipped entirely when omitValidation is on.
+	// AsyncAPI 3.x `enum`, or else the 2.x `schema.enum`; the pattern
+	// is the one in its `x-aapi-codegen`, or else `schema.pattern`.
+	// Enum wins over pattern (a closed enum makes the pattern
+	// redundant); pattern wrapping is skipped entirely when
+	// omitValidation is on.
 	for i, p := range addr.Params {
 		paramDef, ok := raw.Parameters[p.JSONName]
 		if !ok || paramDef == nil {
@@ -168,7 +170,7 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 		if omitValidation {
 			continue
 		}
-		if pattern, ok := parameterPattern(paramDef.Schema); ok {
+		if pattern, ok := parameterPatternValue(paramDef); ok {
 			if err := registerParameterPattern(spec, typeName, pattern); err != nil {
 				return nil, fmt.Errorf("parameter %q: %w", p.JSONName, err)
 			}
@@ -180,6 +182,15 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 		Address: addr,
 		Binding: binding,
 	}, nil
+}
+
+// parameterPatternValue returns a parameter's pattern: the one in its
+// `x-aapi-codegen` extension, or else the AsyncAPI 2.x `schema.pattern`.
+func parameterPatternValue(p *loader.Parameter) (string, bool) {
+	if p.XAAPICodegen != nil && p.XAAPICodegen.Pattern != "" {
+		return p.XAAPICodegen.Pattern, true
+	}
+	return parameterPattern(p.Schema)
 }
 
 // parameterPattern returns the regex from a `{type: string, pattern: ...}`
