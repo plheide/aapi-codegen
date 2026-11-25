@@ -133,9 +133,16 @@ type Parameter struct {
 	// shape, which a 3.x Parameter Object doesn't have: `asyncapi
 	// validate` rejects it. It is still read for specs written that
 	// way: a `type: string` with an `enum` or a `pattern` types the
-	// parameter, unless the parameter declares its own Enum, or its own
-	// pattern in XAAPICodegen.
+	// parameter, unless the parameter declares its own Enum or
+	// XAAPICodegen pattern (see HasOwnType), which wins.
 	Schema map[string]any `yaml:"schema,omitempty"`
+}
+
+// HasOwnType reports whether the parameter declares an enum or an
+// x-aapi-codegen pattern of its own, the AsyncAPI 3.x way. Its Schema
+// is then ignored.
+func (p *Parameter) HasOwnType() bool {
+	return len(p.Enum) > 0 || (p.XAAPICodegen != nil && p.XAAPICodegen.Pattern != "")
 }
 
 // ParameterExtension is `channels.X.parameters.Y.x-aapi-codegen`.

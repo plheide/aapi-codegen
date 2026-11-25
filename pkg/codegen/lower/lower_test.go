@@ -144,6 +144,18 @@ func TestLowerChannel_ParameterTypes(t *testing.T) {
 			wantPattern: "^[a-z]+$",
 			wantChecked: true,
 		},
+		"a 2.x schema.enum and an x-aapi-codegen.pattern, where the parameter's own pattern wins": {
+			param:       &loader.Parameter{Schema: map[string]any{"type": "string", "enum": []any{"eu"}}, XAAPICodegen: pattern},
+			wantType:    "Region",
+			wantPattern: "^[a-z]+$",
+			wantChecked: true,
+		},
+		"a 3.x enum and a 2.x schema.pattern, where the parameter's own enum wins": {
+			param:       &loader.Parameter{Enum: []any{"eu", "us"}, Schema: map[string]any{"type": "string", "pattern": "^[0-9]+$"}},
+			wantType:    "Region",
+			wantValues:  []string{"eu", "us"},
+			wantChecked: true,
+		},
 		"an enum and a pattern, where the enum wins": {
 			param:       &loader.Parameter{Enum: []any{"eu", "us"}, XAAPICodegen: pattern},
 			wantType:    "Region",

@@ -148,12 +148,11 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 	}
 	// Walk each address parameter; if the spec declares an enum or a
 	// pattern for it, override the AddressParam's GoType and register
-	// the type globally on the spec. The enum is the parameter's own
-	// AsyncAPI 3.x `enum`, or else the 2.x `schema.enum`; the pattern
-	// is the one in its `x-aapi-codegen`, or else `schema.pattern`.
-	// Enum wins over pattern (a closed enum makes the pattern
-	// redundant); pattern wrapping is skipped entirely when
-	// omitValidation is on.
+	// the type globally on the spec. A parameter's own AsyncAPI 3.x
+	// `enum` and `x-aapi-codegen.pattern` declare them; only one that
+	// declares neither is typed from its 2.x `schema` instead. Enum wins
+	// over pattern (a closed enum makes the pattern redundant); pattern
+	// wrapping is skipped entirely when omitValidation is on.
 	for i, p := range addr.Params {
 		paramDef, ok := raw.Parameters[p.JSONName]
 		if !ok || paramDef == nil {
@@ -187,9 +186,13 @@ func lowerChannel(name string, raw *loader.Channel, spec *ir.Spec, omitValidatio
 }
 
 // parameterPatternValue returns a parameter's pattern: the one in its
-// `x-aapi-codegen` extension, or else the AsyncAPI 2.x `schema.pattern`.
+// `x-aapi-codegen` extension, or, where the parameter declares no type of
+// its own, the AsyncAPI 2.x `schema.pattern`.
 func parameterPatternValue(p *loader.Parameter) (string, bool) {
-	if p.XAAPICodegen != nil && p.XAAPICodegen.Pattern != "" {
+	if p.HasOwnType() {
+		if p.XAAPICodegen == nil || p.XAAPICodegen.Pattern == "" {
+			return "", false
+		}
 		return p.XAAPICodegen.Pattern, true
 	}
 	return parameterPattern(p.Schema)
@@ -243,11 +246,11 @@ func registerParameterPattern(spec *ir.Spec, typeName, pattern string) error {
 }
 
 // parameterEnumValues returns the values of a parameter's enum: its
-// AsyncAPI 3.x `enum` where it declares one, or else the 2.x
-// `schema.enum`. It returns (nil, false) where that list is empty or
-// holds anything but strings, and the parameter stays a plain string.
+// AsyncAPI 3.x `enum`, or, where the parameter declares no type of its
+// own, the 2.x `schema.enum`. It returns (nil, false) where that list is
+// empty or holds anything but strings.
 func parameterEnumValues(p *loader.Parameter) ([]string, bool) {
-	if len(p.Enum) > 0 {
+	if p.HasOwnType() {
 		return stringValues(p.Enum)
 	}
 	return parameterEnum(p.Schema)

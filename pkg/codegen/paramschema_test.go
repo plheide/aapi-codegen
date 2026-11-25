@@ -8,12 +8,9 @@ import (
 	"testing"
 )
 
-// TestGenerate_ParameterSchemaShape checks that channel parameters
-// declared in the AsyncAPI 2.x shape, with a schema, generate the same
-// code as ones declared the 3.x way, with an enum or an x-aapi-codegen
-// pattern on the parameter, and that only the 2.x shape warns.
-func TestGenerate_ParameterSchemaShape(t *testing.T) {
-	const spec = `asyncapi: 3.1.0
+// parameterSpec is a spec with one send operation on the channel
+// address orders.{region}.{shard}, whose parameters are %PARAMETERS%.
+const parameterSpec = `asyncapi: 3.1.0
 info: { title: T, version: 1.0.0 }
 channels:
   orders:
@@ -30,30 +27,38 @@ operations:
     channel: { $ref: '#/channels/orders' }
     messages: [{ $ref: '#/channels/orders/messages/Order' }]
 `
-	generate := func(t *testing.T, parameters string) (string, []string) {
-		t.Helper()
-		dir := t.TempDir()
-		specPath := filepath.Join(dir, "spec.asyncapi.yaml")
-		if err := os.WriteFile(specPath, []byte(strings.ReplaceAll(spec, "%PARAMETERS%", parameters)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		var warnings []string
-		out := filepath.Join(dir, "out.go")
-		cfg := Config{Package: "x", Output: out, Warn: func(msg string) { warnings = append(warnings, msg) }}
-		if _, err := Generate(specPath, cfg); err != nil {
-			t.Fatalf("Generate: %v", err)
-		}
-		src, err := os.ReadFile(out)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(src), warnings
-	}
 
-	v3, v3Warnings := generate(t, `      region: { enum: [eu, us] }
+// generateWithParameters runs Generate on parameterSpec with the given
+// parameters, and returns the generated code and the warnings.
+func generateWithParameters(t *testing.T, parameters string) (string, []string) {
+	t.Helper()
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "spec.asyncapi.yaml")
+	if err := os.WriteFile(specPath, []byte(strings.ReplaceAll(parameterSpec, "%PARAMETERS%", parameters)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	out := filepath.Join(dir, "out.go")
+	cfg := Config{Package: "x", Output: out, Warn: func(msg string) { warnings = append(warnings, msg) }}
+	if _, err := Generate(specPath, cfg); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	src, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(src), warnings
+}
+
+// TestGenerate_ParameterSchemaShape checks that channel parameters
+// declared in the AsyncAPI 2.x shape, with a schema, generate the same
+// code as ones declared the 3.x way, with an enum or an x-aapi-codegen
+// pattern on the parameter, and that only the 2.x shape warns.
+func TestGenerate_ParameterSchemaShape(t *testing.T) {
+	v3, v3Warnings := generateWithParameters(t, `      region: { enum: [eu, us] }
       shard: { x-aapi-codegen: { pattern: '^s-[0-9]+$' } }
 `)
-	v2, v2Warnings := generate(t, `      region: { schema: { type: string, enum: [eu, us] } }
+	v2, v2Warnings := generateWithParameters(t, `      region: { schema: { type: string, enum: [eu, us] } }
       shard: { schema: { type: string, pattern: '^s-[0-9]+$' } }
 `)
 
@@ -71,5 +76,22 @@ operations:
 	const why = ": schema is the AsyncAPI 2.x form, which a 3.x document can't have; declare enum on the parameter, or x-aapi-codegen.pattern for a pattern"
 	if want := []string{"channels.orders.parameters.region" + why, "channels.orders.parameters.shard" + why}; !slices.Equal(v2Warnings, want) {
 		t.Errorf("the 2.x shape's warnings = %q, want %q", v2Warnings, want)
+	}
+}
+
+// TestGenerate_IgnoredParameterSchema checks that a parameter that
+// declares its own enum or x-aapi-codegen pattern ignores its 2.x schema,
+// whatever that schema declares, and that the warning says so.
+func TestGenerate_IgnoredParameterSchema(t *testing.T) {
+	code, warnings := generateWithParameters(t, `      region:
+        schema: { type: string, enum: [eu] }
+        x-aapi-codegen: { pattern: '^[a-z]+$' }
+`)
+	if !strings.Contains(code, "func NewRegion(v string) (Region, error)") || strings.Contains(code, "RegionEu") {
+		t.Errorf("region should get the pattern type, not the schema's enum\n--- generated ---\n%s", code)
+	}
+	want := []string{"channels.orders.parameters.region: schema is the AsyncAPI 2.x form, which a 3.x document can't have; it is ignored, since the parameter declares its own enum or x-aapi-codegen.pattern"}
+	if !slices.Equal(warnings, want) {
+		t.Errorf("warnings = %q, want %q", warnings, want)
 	}
 }

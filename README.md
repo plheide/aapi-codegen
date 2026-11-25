@@ -314,7 +314,7 @@ Worked specs and assertions live under [`internal/test/`](internal/test/):
 - **Shared-queue subscribers** need one exchange and fixed, distinct routing keys.
 - **Payload only.** Handlers receive only the decoded payload: no headers, correlation ID or reply-to.
 - **No topology.** Generated code doesn't declare queues or exchanges.
-- **A parameter's `schema`.** A channel parameter's `schema`, the AsyncAPI 2.x form, is still read for its `enum` or `pattern`, with a warning: a 3.x document can't have it, and `asyncapi validate` rejects the spec. Declare `enum` on the parameter, or `x-aapi-codegen.pattern`, instead.
+- **A parameter's `schema`.** A channel parameter's `schema`, the AsyncAPI 2.x form, is still read for its `enum` or `pattern`, with a warning: a 3.x document can't have it, and `asyncapi validate` rejects the spec. Declare `enum` on the parameter, or `x-aapi-codegen.pattern`, instead: a parameter that declares either ignores its `schema`.
 - **Unknown keys are ignored.** An unknown `x-aapi-codegen` key produces no warning, so a misspelt key does nothing.
 - **Keywords beside a `$ref`.** In a schema that is a `$ref`, other keywords, such as `required` or `unevaluatedProperties`, are ignored, since the type is the `$ref` target's. A warning names them, except in a schema file that declares draft-07 or earlier, which ignores them too. Put them in an `allOf` beside the `$ref` instead.
 - **A payload schema that is a `$ref`.** If the schema a payload refers to, a file or a `components.schemas` entry, is itself a `$ref` to another schema, go-jsonschema generates only that other schema's type. The generator then stops with an error, unless both schemas have the same `title`. Point the payload's `$ref` at the other schema instead.
